@@ -1,0 +1,6 @@
+node_modules/
+*.log
+background.js
+opaque.js
+popup-ui.js
+package-lock.json
