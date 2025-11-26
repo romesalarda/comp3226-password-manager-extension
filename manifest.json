@@ -3,23 +3,41 @@
   "name": "OPAQUE Research Extension",
   "version": "1.0.0",
   "description": "Browser extension for OPAQUE protocol research",
-  "permissions": [
-    "storage",
-    "activeTab",
-    "cookies"
-  ],
+
+  "permissions": ["storage", "activeTab", "cookies", "scripting"],
+
   "host_permissions": [
-    "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*"
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*/*",
+    "http://*/*"
   ],
+
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
+
   "action": {
     "default_popup": "popup.html",
     "default_title": "OPAQUE Extension"
   },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["nonce_injection/content.js"],
+      "run_at": "document_start"
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["nonce_injection/injected.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }
