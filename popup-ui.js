@@ -1,6 +1,7 @@
 (() => {
   // src/popup-ui.js
   console.log("popup-ui.js loaded and executing");
+  var DJANGO_SERVER = "https://steadfast-reprieve-production.up.railway.app";
   function waitForOpaqueAPI(timeoutMs = 5e3) {
     if (window.opaqueAPI)
       return Promise.resolve(window.opaqueAPI);
@@ -129,7 +130,7 @@
           console.log("Session verified successfully:", sessionCheck);
           updateStatus(`\u2713 Login successful! Opening Django site...`, "success");
           setTimeout(() => {
-            chrome.tabs.create({ url: "http://localhost:8000/o/session/redirect" });
+            chrome.tabs.create({ url: `https://${DJANGO_SERVER}o/session/redirect` });
           }, 1e3);
         } else {
           console.warn("Session verification failed:", sessionCheck);

@@ -1,5 +1,6 @@
 // UI handler for popup
 console.log('popup-ui.js loaded and executing');
+const DJANGO_SERVER = 'https://steadfast-reprieve-production.up.railway.app';
 
 // Helper: wait for the global opaqueAPI to be available. Uses an event
 // dispatched by `popup.js` (opaqueAPIReady) with a timeout fallback.
@@ -176,7 +177,7 @@ if (loginBtn) {
         // Open Django redirect endpoint to transfer session to browser context
         // This endpoint will validate the session and redirect to home page
         setTimeout(() => {
-          chrome.tabs.create({ url: 'http://localhost:8000/o/session/redirect' });
+          chrome.tabs.create({ url: `https://${DJANGO_SERVER}o/session/redirect` });
         }, 1000);
       } else {
         console.warn('Session verification failed:', sessionCheck);

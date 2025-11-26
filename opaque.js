@@ -490,7 +490,7 @@ ${val.stack}`;
   });
 
   // src/opaque.js
-  var DJANGO_SERVER = "http://localhost:8000";
+  var DJANGO_SERVER = "https://steadfast-reprieve-production.up.railway.app";
   async function getCSRFToken() {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(

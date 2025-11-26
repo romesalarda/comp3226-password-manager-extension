@@ -2,7 +2,7 @@
 import * as opaque from "@serenity-kit/opaque";
 
 // Django server configuration
-const DJANGO_SERVER = 'http://localhost:8000';
+const DJANGO_SERVER = 'https://steadfast-reprieve-production.up.railway.app';
 
 // Helper function to get CSRF token from Django cookie via background script
 async function getCSRFToken() {
