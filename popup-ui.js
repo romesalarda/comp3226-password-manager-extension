@@ -1,7 +1,6 @@
 (() => {
   // src/popup-ui.js
   console.log("popup-ui.js loaded and executing");
-  var DJANGO_SERVER = "https://steadfast-reprieve-production.up.railway.app";
   function waitForOpaqueAPI(timeoutMs = 5e3) {
     if (window.opaqueAPI)
       return Promise.resolve(window.opaqueAPI);
@@ -34,7 +33,8 @@
     const password = document.getElementById("password").value;
     return { email, password };
   }
-  function validateForm(email, password) {
+  async function validateForm(email, password) {
+    const api = await waitForOpaqueAPI();
     if (!email) {
       updateStatus("Please enter an email address", "error");
       return false;
@@ -47,9 +47,13 @@
       updateStatus("Please enter a valid email address", "error");
       return false;
     }
-    if (password.length < 6) {
-      updateStatus("Password must be at least 6 characters", "error");
-      return false;
+    try {
+      await api.getPasswordFromStorage(email);
+    } catch (error) {
+      if (password.length < 6) {
+        updateStatus("Password must be at least 6 characters", "error");
+        return false;
+      }
     }
     return true;
   }
@@ -81,6 +85,8 @@
         console.log("Step 2 response:", step2Result);
         updateStatus(`\u2713 Registration successful for ${email}!`, "success");
         console.log("Full registration complete:", step2Result);
+        api.savePasswordToStorage(email, password);
+        console.log("Username and password saved in local storage");
       } catch (error) {
         console.error("Registration error:", error);
         updateStatus(`\u2717 Registration failed: ${error.message}`, "error");
@@ -94,14 +100,18 @@
     console.log("Adding click event listener to loginBtn");
     loginBtn.addEventListener("click", async () => {
       console.log("Login button clicked!");
-      const { email, password } = getFormValues();
+      let { email, password } = getFormValues();
       if (!validateForm(email, password)) {
         return;
       }
       try {
         updateStatus("Initializing OPAQUE login...", "info");
-        console.log("Waiting for opaqueAPI...");
         const api = await waitForOpaqueAPI();
+        if (!password) {
+          password = await api.getPasswordFromStorage(email);
+          console.log("Password retrieved from local storage");
+        }
+        console.log("Waiting for opaqueAPI...");
         console.log("opaqueAPI received:", api);
         updateStatus("Step 1: Sending login request...", "info");
         console.log("Step 1: Starting login for:", email);
@@ -126,11 +136,12 @@
         console.log("Session key established");
         console.log("Verifying session...");
         const sessionCheck = await api.verifySession();
+        const websiteOrigin = await api.getWebsiteOrigin();
         if (sessionCheck.authenticated) {
           console.log("Session verified successfully:", sessionCheck);
           updateStatus(`\u2713 Login successful! Opening Django site...`, "success");
           setTimeout(() => {
-            chrome.tabs.create({ url: `https://${DJANGO_SERVER}o/session/redirect` });
+            chrome.tabs.create({ url: `${websiteOrigin}/o/session/redirect` });
           }, 1e3);
         } else {
           console.warn("Session verification failed:", sessionCheck);

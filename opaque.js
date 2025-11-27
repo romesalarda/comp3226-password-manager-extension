@@ -490,11 +490,32 @@ ${val.stack}`;
   });
 
   // src/opaque.js
-  var DJANGO_SERVER = "https://steadfast-reprieve-production.up.railway.app";
+  var websiteOrigin = null;
+  async function getWebsiteOrigin() {
+    if (websiteOrigin) {
+      return websiteOrigin;
+    }
+    return new Promise((resolve, reject) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+          return;
+        }
+        if (tabs[0]) {
+          websiteOrigin = new URL(tabs[0].url).origin;
+          console.log("Current website:", websiteOrigin);
+          resolve(websiteOrigin);
+        } else {
+          console.log("No active tab found");
+          reject(new Error("No active tab found"));
+        }
+      });
+    });
+  }
   async function getCSRFToken() {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
-        { action: "getCSRFToken", url: DJANGO_SERVER },
+        { action: "getCSRFToken", url: websiteOrigin },
         (response) => {
           if (chrome.runtime.lastError) {
             reject(chrome.runtime.lastError);
@@ -546,8 +567,9 @@ ${val.stack}`;
       const { clientRegistrationState, registrationRequest } = client.startRegistration({ password });
       opaqueState.clientRegistrationState = clientRegistrationState;
       console.log("Registration request created:", registrationRequest);
+      const websiteOrigin2 = await getWebsiteOrigin();
       const csrfToken = await getCSRFToken();
-      const response = await fetch(`${DJANGO_SERVER}/o/registration`, {
+      const response = await fetch(`${websiteOrigin2}/o/registration`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -588,7 +610,8 @@ ${val.stack}`;
       });
       console.log("Registration record created:", registrationRecord);
       const csrfToken = await getCSRFToken();
-      const response = await fetch(`${DJANGO_SERVER}/o/registration/finish`, {
+      const websiteOrigin2 = await getWebsiteOrigin();
+      const response = await fetch(`${websiteOrigin2}/o/registration/finish`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -623,7 +646,8 @@ ${val.stack}`;
       opaqueState.clientLoginState = clientLoginState;
       console.log("Login request created:", startLoginRequest);
       const csrfToken = await getCSRFToken();
-      const response = await fetch(`${DJANGO_SERVER}/o/login`, {
+      const websiteOrigin2 = await getWebsiteOrigin();
+      const response = await fetch(`${websiteOrigin2}/o/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -670,7 +694,8 @@ ${val.stack}`;
       const { finishLoginRequest, exportKey, sessionKey } = loginStatus;
       console.log("Session key established");
       const csrfToken = await getCSRFToken();
-      const response = await fetch(`${DJANGO_SERVER}/o/login/finish`, {
+      const websiteOrigin2 = await getWebsiteOrigin();
+      const response = await fetch(`${websiteOrigin2}/o/login/finish`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -702,7 +727,8 @@ ${val.stack}`;
   async function verifySession() {
     try {
       console.log("Verifying session...");
-      const response = await fetch(`${DJANGO_SERVER}/o/session/verify`, {
+      const websiteOrigin2 = await getWebsiteOrigin();
+      const response = await fetch(`${websiteOrigin2}/o/session/verify`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json"
@@ -732,7 +758,8 @@ ${val.stack}`;
     try {
       console.log("Logging out...");
       const csrfToken = await getCSRFToken();
-      const response = await fetch(`${DJANGO_SERVER}/o/session/logout`, {
+      const websiteOrigin2 = await getWebsiteOrigin();
+      const response = await fetch(`${websiteOrigin2}/o/session/logout`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -753,6 +780,26 @@ ${val.stack}`;
       throw error;
     }
   }
+  function savePasswordToStorage(email, password) {
+    chrome.storage.local.set({ [`password_${email}_${websiteOrigin}`]: password }, () => {
+      if (chrome.runtime.lastError) {
+        console.error("Error saving password to storage:", chrome.runtime.lastError);
+      } else {
+        console.log("Password saved to storage for", email);
+      }
+    });
+  }
+  function getPasswordFromStorage(email) {
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.get([`password_${email}_${websiteOrigin}`], (result) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else {
+          resolve(result[`password_${email}_${websiteOrigin}`]);
+        }
+      });
+    });
+  }
   window.opaqueAPI = {
     startRegistration,
     finishRegistration,
@@ -767,7 +814,10 @@ ${val.stack}`;
       hasLoginState: !!opaqueState.clientLoginState,
       loginEmail: opaqueState.loginEmail
     }),
-    clearState: () => opaqueState.clearAll()
+    clearState: () => opaqueState.clearAll(),
+    savePasswordToStorage,
+    getPasswordFromStorage,
+    getWebsiteOrigin
   };
   try {
     window.dispatchEvent(new Event("opaqueAPIReady"));

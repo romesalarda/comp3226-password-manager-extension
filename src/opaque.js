@@ -2,13 +2,38 @@
 import * as opaque from "@serenity-kit/opaque";
 
 // Django server configuration
-const DJANGO_SERVER = 'https://steadfast-reprieve-production.up.railway.app';
+// const DJANGO_SERVER = 'https://steadfast-reprieve-production.up.railway.app';
+let websiteOrigin = null;
+  
+async function getWebsiteOrigin() {
+  if (websiteOrigin) {
+    return websiteOrigin;
+  }
+  
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError);
+        return;
+      }
+      
+      if (tabs[0]) {
+        websiteOrigin = new URL(tabs[0].url).origin;
+        console.log('Current website:', websiteOrigin);
+        resolve(websiteOrigin);
+      } else {
+        console.log('No active tab found');
+        reject(new Error('No active tab found'));
+      }
+    });
+  });
+}
 
 // Helper function to get CSRF token from Django cookie via background script
 async function getCSRFToken() {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
-      { action: 'getCSRFToken', url: DJANGO_SERVER },
+      { action: 'getCSRFToken', url: websiteOrigin },
       (response) => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError);
@@ -74,10 +99,11 @@ async function startRegistration(email, password) {
     opaqueState.clientRegistrationState = clientRegistrationState;
     
     console.log('Registration request created:', registrationRequest);
+    const websiteOrigin = await getWebsiteOrigin();
     
     const csrfToken = await getCSRFToken(); // run background script for security 
     
-    const response = await fetch(`${DJANGO_SERVER}/o/registration`, {
+    const response = await fetch(`${websiteOrigin}/o/registration`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -130,9 +156,10 @@ async function finishRegistration(registrationResponse) {
     
     // Get CSRF token from cookie
     const csrfToken = await getCSRFToken();
+    const websiteOrigin = await getWebsiteOrigin();
     
     // Send registration record to Django server to store
-    const response = await fetch(`${DJANGO_SERVER}/o/registration/finish`, {
+    const response = await fetch(`${websiteOrigin}/o/registration/finish`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -186,9 +213,10 @@ async function startLogin(email, password) {
     
     // Get CSRF token from cookie
     const csrfToken = await getCSRFToken();
+    const websiteOrigin = await getWebsiteOrigin();
     
     // Send login request to Django server
-    const response = await fetch(`${DJANGO_SERVER}/o/login`, {
+    const response = await fetch(`${websiteOrigin}/o/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -253,9 +281,10 @@ async function finishLogin(loginResponse, cacheKey) {
     
     // Get CSRF token from cookie
     const csrfToken = await getCSRFToken();
+    const websiteOrigin = await getWebsiteOrigin();
     
     // Send finish login request to Django server with cache key
-    const response = await fetch(`${DJANGO_SERVER}/o/login/finish`, {
+    const response = await fetch(`${websiteOrigin}/o/login/finish`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -294,8 +323,9 @@ async function finishLogin(loginResponse, cacheKey) {
 async function verifySession() {
   try {
     console.log('Verifying session...');
+    const websiteOrigin = await getWebsiteOrigin();
     
-    const response = await fetch(`${DJANGO_SERVER}/o/session/verify`, {
+    const response = await fetch(`${websiteOrigin}/o/session/verify`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -331,8 +361,9 @@ async function logoutSession() {
     
     // Get CSRF token from cookie
     const csrfToken = await getCSRFToken();
+    const websiteOrigin = await getWebsiteOrigin();
     
-    const response = await fetch(`${DJANGO_SERVER}/o/session/logout`, {
+    const response = await fetch(`${websiteOrigin}/o/session/logout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -358,6 +389,28 @@ async function logoutSession() {
   }
 }
 
+function savePasswordToStorage(email, password) {
+  chrome.storage.local.set({ [`password_${email}_${websiteOrigin}`]: password }, () => {
+    if (chrome.runtime.lastError) {
+      console.error('Error saving password to storage:', chrome.runtime.lastError);
+    } else {
+      console.log('Password saved to storage for', email);
+    }
+  });
+}
+
+function getPasswordFromStorage(email) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get([`password_${email}_${websiteOrigin}`], (result) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError);
+      } else {
+        resolve(result[`password_${email}_${websiteOrigin}`]);
+      }
+    });
+  });
+}
+
 // Export functions for use in popup.html
 window.opaqueAPI = {
   startRegistration,
@@ -373,7 +426,12 @@ window.opaqueAPI = {
     hasLoginState: !!opaqueState.clientLoginState,
     loginEmail: opaqueState.loginEmail
   }),
-  clearState: () => opaqueState.clearAll()
+  clearState: () => opaqueState.clearAll(),
+
+  savePasswordToStorage,
+  getPasswordFromStorage,
+
+  getWebsiteOrigin
 };
 
 // Notify any UI scripts that the API is ready to be used. Useful to avoid
