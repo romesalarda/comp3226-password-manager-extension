@@ -24,10 +24,16 @@ A minimal browser extension for testing OPAQUE protocol with a Django backend.
      - Go to `about:debugging#/runtime/this-firefox`
      - Click "Load Temporary Add-on"
      - Select `manifest.json` from this directory
+     
+#### Security Notes
 
-## Usage
+⚠️ **For Testing/Research Only**: This implementation stores passwords in plain text in local storage. In a production password manager, you would:
+- Encrypt passwords before storage
+- Use a master password
+- Sync encrypted credentials via cloud storage
+- Implement proper key derivation and encryption
 
-The extension provides OPAQUE client functionality to communicate with your Django server at `http://localhost:8000`.
+This simplified approach is designed to test OPAQUE protocol usability without the complexity of full password management security.
 
 ### Available Functions
 

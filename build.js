@@ -55,4 +55,13 @@ await esbuild
   })
   .catch(() => process.exit(1));
 
+// Build autofill content script
+await esbuild
+  .build({
+    ...buildOptions,
+    entryPoints: ["src/autofill.js"],
+    outfile: "autofill.js",
+  })
+  .catch(() => process.exit(1));
+
 console.log("Build complete! ✓");

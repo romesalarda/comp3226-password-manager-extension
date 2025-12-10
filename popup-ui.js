@@ -1,6 +1,51 @@
 (() => {
   // src/popup-ui.js
   console.log("popup-ui.js loaded and executing");
+  async function saveCredentialsForAutofill(username, password) {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          action: "saveCredentials",
+          username,
+          password
+        });
+        console.log("Credentials sent to autofill system:", response);
+      }
+    } catch (error) {
+      console.log("Could not send to autofill (tab may not be ready):", error.message);
+    }
+  }
+  async function getCredentialDraft() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          action: "getDraft"
+        });
+        console.log("Draft retrieved from content script:", response);
+        return response?.draft || null;
+      }
+    } catch (error) {
+      console.log("Could not get draft from content script:", error.message);
+      return null;
+    }
+  }
+  async function clearCredentialDraft() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          action: "clearDraft"
+        });
+        console.log("Draft cleared in content script:", response);
+        return response?.success || false;
+      }
+    } catch (error) {
+      console.log("Could not clear draft in content script:", error.message);
+      return false;
+    }
+  }
   function waitForOpaqueAPI(timeoutMs = 5e3) {
     if (window.opaqueAPI)
       return Promise.resolve(window.opaqueAPI);
@@ -87,9 +132,16 @@
         console.log("Full registration complete:", step2Result);
         api.savePasswordToStorage(email, password);
         console.log("Username and password saved in local storage");
+        await saveCredentialsForAutofill(email, password);
       } catch (error) {
         console.error("Registration error:", error);
-        updateStatus(`\u2717 Registration failed: ${error.message}`, "error");
+        if (error.message.includes("404") || error.message.includes("not found")) {
+          updateStatus("\u26A0 OPAQUE not supported. Using standard autofill fallback.", "warning");
+          await saveCredentialsForAutofill(email, password);
+          console.log("[Fallback] Credentials saved for autofill (OPAQUE not available)");
+        } else {
+          updateStatus(`\u2717 Registration failed: ${error.message}`, "error");
+        }
       }
     });
   } else {
@@ -140,6 +192,7 @@
         if (sessionCheck.authenticated) {
           console.log("Session verified successfully:", sessionCheck);
           updateStatus(`\u2713 Login successful! Opening Django site...`, "success");
+          await saveCredentialsForAutofill(email, password);
           setTimeout(() => {
             chrome.tabs.create({ url: `${websiteOrigin}/o/session/redirect` });
           }, 1e3);
@@ -149,20 +202,77 @@
         }
       } catch (error) {
         console.error("Login error:", error);
-        updateStatus(`\u2717 Login failed: ${error.message}`, "error");
+        if (error.message.includes("404") || error.message.includes("not found")) {
+          updateStatus("\u26A0 OPAQUE not supported. Using standard autofill fallback.", "warning");
+          await saveCredentialsForAutofill(email, password);
+          console.log("[Fallback] Credentials saved for autofill (OPAQUE not available)");
+        } else {
+          updateStatus(`\u2717 Login failed: ${error.message}`, "error");
+        }
       }
     });
   } else {
     console.warn("popup-ui: #loginBtn not found in DOM");
   }
   window.addEventListener("DOMContentLoaded", async () => {
-    console.log("Popup loaded, checking session status...");
+    console.log("Popup loaded, checking session status and credential draft...");
+    try {
+      const draft = await getCredentialDraft();
+      if (draft && draft.username && draft.password) {
+        console.log("Credential draft found:", { domain: draft.domain, username: draft.username });
+        const draftNotification = document.getElementById("draftNotification");
+        const draftUsernameDisplay = document.getElementById("draftUsername");
+        if (draftNotification && draftUsernameDisplay) {
+          draftUsernameDisplay.textContent = `\u{1F464} ${draft.username}`;
+          draftNotification.classList.add("show");
+          const saveDraftBtn = document.getElementById("saveDraftBtn");
+          if (saveDraftBtn) {
+            saveDraftBtn.addEventListener("click", async () => {
+              console.log("Saving draft credentials...");
+              updateStatus("Saving credentials...", "info");
+              try {
+                await saveCredentialsForAutofill(draft.username, draft.password);
+                await clearCredentialDraft();
+                draftNotification.classList.remove("show");
+                updateStatus("\u2713 Credentials saved successfully!", "success");
+              } catch (error) {
+                console.error("Failed to save draft:", error);
+                updateStatus(`\u2717 Failed to save: ${error.message}`, "error");
+              }
+            });
+          }
+          const discardDraftBtn = document.getElementById("discardDraftBtn");
+          if (discardDraftBtn) {
+            discardDraftBtn.addEventListener("click", async () => {
+              console.log("Discarding draft credentials...");
+              try {
+                await clearCredentialDraft();
+                draftNotification.classList.remove("show");
+                updateStatus("Draft discarded", "info");
+                setTimeout(() => {
+                  const statusDiv = document.getElementById("status");
+                  if (statusDiv)
+                    statusDiv.classList.remove("show");
+                }, 2e3);
+              } catch (error) {
+                console.error("Failed to discard draft:", error);
+              }
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.log("Draft check failed:", error.message);
+    }
     try {
       const api = await waitForOpaqueAPI();
       const sessionCheck = await api.verifySession();
       if (sessionCheck.authenticated) {
         console.log("Active session found:", sessionCheck);
-        updateStatus(`\u2713 Logged in as ${sessionCheck.email}`, "success");
+        const draftNotification = document.getElementById("draftNotification");
+        if (!draftNotification || !draftNotification.classList.contains("show")) {
+          updateStatus(`\u2713 Logged in as ${sessionCheck.email}`, "success");
+        }
       } else {
         console.log("No active session");
       }

@@ -2,6 +2,73 @@
 console.log('popup-ui.js loaded and executing');
 // const DJANGO_SERVER = 'https://steadfast-reprieve-production.up.railway.app';
 
+// Helper: Save credentials for autofill system
+async function saveCredentialsForAutofill(username, password) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'saveCredentials',
+        username: username,
+        password: password
+      });
+      console.log('Credentials sent to autofill system:', response);
+    }
+  } catch (error) {
+    console.log('Could not send to autofill (tab may not be ready):', error.message);
+  }
+}
+
+async function getCredentialDraft() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'getDraft'
+      });
+      console.log('Draft retrieved from content script:', response);
+      return response?.draft || null;
+    }
+  } catch (error) {
+    console.log('Could not get draft from content script:', error.message);
+    return null;
+  }
+}
+
+// Helper: Clear credential draft
+async function clearCredentialDraft() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'clearDraft'
+      });
+      console.log('Draft cleared in content script:', response);
+      return response?.success || false;
+    }
+  } catch (error) {
+    console.log('Could not clear draft in content script:', error.message);
+    return false;
+  }
+}
+
+// Helper: Trigger autofill
+async function triggerAutofill() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'fillCredentials'
+      });
+      console.log('Autofill triggered:', response);
+      return response?.success || false;
+    }
+  } catch (error) {
+    console.log('Could not trigger autofill:', error.message);
+    return false;
+  }
+}
+
 function waitForOpaqueAPI(timeoutMs = 5000) {
   if (window.opaqueAPI) return Promise.resolve(window.opaqueAPI);
 
@@ -23,7 +90,6 @@ function waitForOpaqueAPI(timeoutMs = 5000) {
   });
 }
 
-// Helper: Update status display
 function updateStatus(message, type = 'info') {
   const statusDiv = document.getElementById('status');
   if (statusDiv) {
@@ -32,14 +98,12 @@ function updateStatus(message, type = 'info') {
   }
 }
 
-// Helper: Get form values
 function getFormValues() {
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
   return { email, password };
 }
 
-// Helper: Validate form inputs
 async function validateForm(email, password) {
   const api = await waitForOpaqueAPI();
   if (!email) {
@@ -114,10 +178,21 @@ if (registerBtn) {
       api.savePasswordToStorage(email, password);
       console.log("Username and password saved in local storage");
 
+      // Save credentials for autofill
+      await saveCredentialsForAutofill(email, password);
       
     } catch (error) {
       console.error('Registration error:', error);
-      updateStatus(`✗ Registration failed: ${error.message}`, 'error');
+      
+      // Check if OPAQUE is not supported (404 or similar)
+      if (error.message.includes('404') || error.message.includes('not found')) {
+        updateStatus('⚠ OPAQUE not supported. Using standard autofill fallback.', 'warning');
+        // Still save credentials for autofill
+        await saveCredentialsForAutofill(email, password);
+        console.log('[Fallback] Credentials saved for autofill (OPAQUE not available)');
+      } else {
+        updateStatus(`✗ Registration failed: ${error.message}`, 'error');
+      }
     }
   });
 } else {
@@ -188,6 +263,9 @@ if (loginBtn) {
         console.log('Session verified successfully:', sessionCheck);
         updateStatus(`✓ Login successful! Opening Django site...`, 'success');
         
+        // Save credentials for autofill
+        await saveCredentialsForAutofill(email, password);
+        
         // Open Django redirect endpoint to transfer session to browser context
         // This endpoint will validate the session and redirect to home page
         setTimeout(() => {
@@ -200,25 +278,106 @@ if (loginBtn) {
       
     } catch (error) {
       console.error('Login error:', error);
-      updateStatus(`✗ Login failed: ${error.message}`, 'error');
+      
+      // Check if OPAQUE is not supported (404 or similar)
+      if (error.message.includes('404') || error.message.includes('not found')) {
+        updateStatus('⚠ OPAQUE not supported. Using standard autofill fallback.', 'warning');
+        // Still save credentials for autofill
+        await saveCredentialsForAutofill(email, password);
+        console.log('[Fallback] Credentials saved for autofill (OPAQUE not available)');
+      } else {
+        updateStatus(`✗ Login failed: ${error.message}`, 'error');
+      }
     }
   });
 } else {
   console.warn('popup-ui: #loginBtn not found in DOM');
 }
 
-// Add session check on popup load
+// Add session check and draft check on popup load
 window.addEventListener('DOMContentLoaded', async () => {
-  console.log('Popup loaded, checking session status...');
+  console.log('Popup loaded, checking session status and credential draft...');
   
+  // Check for credential draft
+  try {
+    const draft = await getCredentialDraft();
+    if (draft && draft.username && draft.password) {
+      console.log('Credential draft found:', { domain: draft.domain, username: draft.username });
+      
+      // Show draft notification
+      const draftNotification = document.getElementById('draftNotification');
+      const draftUsernameDisplay = document.getElementById('draftUsername');
+      
+      if (draftNotification && draftUsernameDisplay) {
+        draftUsernameDisplay.textContent = `👤 ${draft.username}`;
+        draftNotification.classList.add('show');
+        
+        // Handle "Save Now" button
+        const saveDraftBtn = document.getElementById('saveDraftBtn');
+        if (saveDraftBtn) {
+          saveDraftBtn.addEventListener('click', async () => {
+            console.log('Saving draft credentials...');
+            updateStatus('Saving credentials...', 'info');
+            
+            try {
+              // Save to autofill system
+              await saveCredentialsForAutofill(draft.username, draft.password);
+              
+              // Clear the draft
+              await clearCredentialDraft();
+              
+              // Hide notification
+              draftNotification.classList.remove('show');
+              
+              updateStatus('✓ Credentials saved successfully!', 'success');
+            } catch (error) {
+              console.error('Failed to save draft:', error);
+              updateStatus(`✗ Failed to save: ${error.message}`, 'error');
+            }
+          });
+        }
+        
+        // Handle "Discard" button
+        const discardDraftBtn = document.getElementById('discardDraftBtn');
+        if (discardDraftBtn) {
+          discardDraftBtn.addEventListener('click', async () => {
+            console.log('Discarding draft credentials...');
+            
+            try {
+              // Clear the draft
+              await clearCredentialDraft();
+              
+              // Hide notification
+              draftNotification.classList.remove('show');
+              
+              updateStatus('Draft discarded', 'info');
+              setTimeout(() => {
+                const statusDiv = document.getElementById('status');
+                if (statusDiv) statusDiv.classList.remove('show');
+              }, 2000);
+            } catch (error) {
+              console.error('Failed to discard draft:', error);
+            }
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.log('Draft check failed:', error.message);
+  }
+  
+  // Check session status
   try {
     const api = await waitForOpaqueAPI();
-
     const sessionCheck = await api.verifySession();
     
     if (sessionCheck.authenticated) {
       console.log('Active session found:', sessionCheck);
-      updateStatus(`✓ Logged in as ${sessionCheck.email}`, 'success');
+      // Only show if no draft notification is visible
+      const draftNotification = document.getElementById('draftNotification');
+      if (!draftNotification || !draftNotification.classList.contains('show')) {
+        updateStatus(`✓ Logged in as ${sessionCheck.email}`, 'success');
+      }
     } else {
       console.log('No active session');
     }

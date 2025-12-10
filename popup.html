@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OPAQUE Extension</title>
   <style>
     body {
@@ -13,6 +14,90 @@
     h3 {
       margin-top: 0;
       color: #333;
+    }
+    
+    #draftNotification {
+      display: none;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      animation: slideIn 0.3s ease-out;
+    }
+    
+    #draftNotification.show {
+      display: block;
+    }
+    
+    @keyframes slideIn {
+      from {
+        transform: translateY(-20px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+    
+    #draftNotification h4 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    #draftNotification p {
+      margin: 0 0 12px 0;
+      font-size: 12px;
+      opacity: 0.95;
+    }
+    
+    #draftNotification .draft-username {
+      background: rgba(255, 255, 255, 0.2);
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+    
+    #draftNotification .draft-actions {
+      display: flex;
+      gap: 8px;
+    }
+    
+    #draftNotification button {
+      flex: 1;
+      padding: 8px;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    #saveDraftBtn {
+      background: white;
+      color: #667eea;
+    }
+    
+    #saveDraftBtn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    
+    #discardDraftBtn {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    
+    #discardDraftBtn:hover {
+      background: rgba(255, 255, 255, 0.3);
     }
     
     .form-group {
@@ -106,10 +191,49 @@
       color: #0c5460;
       border: 1px solid #bee5eb;
     }
+    
+    .warning {
+      background-color: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeaa7;
+    }
+    
+    .divider {
+      margin: 15px 0;
+      border-top: 1px solid #e0e0e0;
+      position: relative;
+    }
+    
+    .divider span {
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: white;
+      padding: 0 10px;
+      font-size: 11px;
+      color: #999;
+      text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
   <h3>OPAQUE Test Extension</h3>
+  
+  <div id="draftNotification">
+    <h4>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+      </svg>
+      Unsaved Credentials Found
+    </h4>
+    <p>You entered credentials on this site but didn't save them.</p>
+    <div class="draft-username" id="draftUsername">👤 username</div>
+    <div class="draft-actions">
+      <button id="saveDraftBtn">💾 Save Now</button>
+      <button id="discardDraftBtn">✖ Discard</button>
+    </div>
+  </div>
   
   <div class="form-group">
     <label for="email">Email</label>
@@ -126,6 +250,10 @@
     <button id="loginBtn">Login</button>
   </div>
   
+  <div class="divider">
+    <span>or</span>
+  </div>
+    
   <div id="status"></div>
 
   <script type="module" src="opaque.js"></script>
