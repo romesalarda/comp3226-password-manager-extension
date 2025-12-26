@@ -2,6 +2,42 @@
   // src/autofill.js
   console.log("[Autofill] Content script loaded");
   var autofillBadge = null;
+  function injectPageScript() {
+    const script = document.createElement("script");
+    script.src = chrome.runtime.getURL("opaque-page-injected.js");
+    script.type = "text/javascript";
+    script.onload = () => {
+      console.log("[Autofill] Page script injected successfully");
+      script.remove();
+    };
+    script.onerror = (error) => {
+      console.error("[Autofill] Failed to inject page script:", error);
+    };
+    (document.head || document.documentElement).appendChild(script);
+  }
+  window.addEventListener("OPAQUE:RequestLogin", (event) => {
+    console.log("[Autofill] Received OPAQUE:RequestLogin from page", event.detail);
+    chrome.runtime.sendMessage({
+      type: "open-opaque-popup",
+      origin: event.detail.origin
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("[Autofill] Failed to request popup:", chrome.runtime.lastError);
+      } else {
+        console.log("[Autofill] Popup open request sent:", response);
+      }
+    });
+  });
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === "opaque-result") {
+      console.log("[Autofill] Received OPAQUE result, forwarding to page");
+      window.dispatchEvent(new CustomEvent("OPAQUE:Complete", {
+        detail: request.data
+      }));
+      sendResponse({ received: true });
+      return true;
+    }
+  });
   function getCurrentDomain() {
     return window.location.origin;
   }
@@ -445,6 +481,21 @@
         console.log(`[Autofill] Credentials ${isUpdate ? "updated" : "saved"} by user choice`);
         prompt.remove();
         showSaveConfirmation(isUpdate);
+        const opaqueSupported = await checkOpaqueSupport();
+        if (opaqueSupported) {
+          console.log("[Autofill] OPAQUE supported - triggering auto-registration");
+          chrome.runtime.sendMessage({
+            action: "registerWithOpaque",
+            username,
+            password
+          }, (response) => {
+            if (response && response.success) {
+              console.log("[Autofill] OPAQUE registration completed successfully");
+            } else {
+              console.log("[Autofill] OPAQUE registration failed or not supported");
+            }
+          });
+        }
       } catch (error) {
         console.error("[Autofill] Failed to save credentials:", error);
       }
@@ -518,6 +569,20 @@
       console.error("[Autofill] Failed to clear draft:", error);
     }
   }
+  async function checkOpaqueSupport() {
+    try {
+      const domain = getCurrentDomain();
+      const response = await fetch(`${domain}/o/check`, {
+        method: "GET",
+        credentials: "include"
+      });
+      console.log("[Autofill] OPAQUE endpoint accessible - OPAQUE is supported");
+      return true;
+    } catch (error) {
+      console.log("[Autofill] OPAQUE not supported on this site:", error.message);
+      return false;
+    }
+  }
   function monitorCredentialInputs() {
     console.log("[Autofill] Setting up credential input monitoring");
     const fieldCache = /* @__PURE__ */ new Map();
@@ -568,20 +633,26 @@
   }
   async function init() {
     console.log("[Autofill] Initializing autofill system");
+    injectPageScript();
     const credentials = await getStoredCredentials(getCurrentDomain());
     if (credentials) {
-      console.log("[Autofill] Stored credentials found, setting up focus detection");
-      localStorage.removeItem("opaque_credential_draft");
+      console.log("[Autofill] Stored credentials found");
     }
     setupSPARouteDetection();
     monitorCredentialInputs();
     checkForDraftAndPrompt();
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", attemptAutofill);
+    const opaqueSupported = await checkOpaqueSupport();
+    if (opaqueSupported && credentials) {
+      console.log("[Autofill] OPAQUE supported - page script will handle UI");
     } else {
-      attemptAutofill();
+      console.log("[Autofill] Using standard autofill behavior");
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", attemptAutofill);
+      } else {
+        attemptAutofill();
+      }
+      setTimeout(attemptAutofill, 2e3);
     }
-    setTimeout(attemptAutofill, 2e3);
   }
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log("listener triggered", request);
@@ -609,6 +680,48 @@
     if (request.action === "clearDraft") {
       clearDraft();
       sendResponse({ success: true });
+      return true;
+    }
+    if (request.action === "getStoredCredentials") {
+      const domain = getCurrentDomain();
+      getStoredCredentials(domain).then((credentials) => {
+        console.log("[Autofill] Credentials retrieved for popup");
+        sendResponse({ success: true, credentials });
+      }).catch((error) => {
+        console.error("[Autofill] Failed to get credentials:", error);
+        sendResponse({ success: false, error: error.message });
+      });
+      return true;
+    }
+    if (request.action === "clearCredentials") {
+      const domain = getCurrentDomain();
+      chrome.storage.local.remove([`credentials_${domain}`], () => {
+        if (chrome.runtime.lastError) {
+          console.error("[Autofill] Failed to clear credentials:", chrome.runtime.lastError);
+          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        } else {
+          console.log("[Autofill] Credentials cleared for domain:", domain);
+          sendResponse({ success: true });
+        }
+      });
+      return true;
+    }
+    if (request.action === "executeOpaqueLogin") {
+      console.log("[Autofill] Received OPAQUE login request");
+      const username = request.username;
+      const password = request.password;
+      chrome.storage.local.set({
+        "pending_opaque_login": {
+          username,
+          password,
+          timestamp: Date.now()
+        }
+      }, () => {
+        console.log("[Autofill] Stored pending login, opening popup...");
+        chrome.runtime.sendMessage({ action: "openPopupForLogin" }, (response) => {
+          sendResponse({ success: true, queued: true, message: "Login queued for popup" });
+        });
+      });
       return true;
     }
   });

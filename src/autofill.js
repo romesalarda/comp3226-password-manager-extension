@@ -3,6 +3,54 @@ console.log('[Autofill] Content script loaded');
 
 let autofillBadge = null;
 
+// Inject page-level script for OPAQUE UI and event handling
+function injectPageScript() {
+  const script = document.createElement('script');
+  script.src = chrome.runtime.getURL('opaque-page-injected.js');
+  script.type = 'text/javascript';
+  script.onload = () => {
+    console.log('[Autofill] Page script injected successfully');
+    script.remove(); // Clean up after injection
+  };
+  script.onerror = (error) => {
+    console.error('[Autofill] Failed to inject page script:', error);
+  };
+  (document.head || document.documentElement).appendChild(script);
+}
+
+// Listen for OPAQUE login request from page script
+window.addEventListener('OPAQUE:RequestLogin', (event) => {
+  console.log('[Autofill] Received OPAQUE:RequestLogin from page', event.detail);
+  
+  // Forward to background script to open popup
+  chrome.runtime.sendMessage({ 
+    type: 'open-opaque-popup',
+    origin: event.detail.origin 
+  }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('[Autofill] Failed to request popup:', chrome.runtime.lastError);
+    } else {
+      console.log('[Autofill] Popup open request sent:', response);
+    }
+  });
+});
+
+
+// Listen for OPAQUE results from background/popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === 'opaque-result') {
+    console.log('[Autofill] Received OPAQUE result, forwarding to page');
+    
+    // Dispatch result to page script
+    window.dispatchEvent(new CustomEvent('OPAQUE:Complete', {
+      detail: request.data
+    }));
+    
+    sendResponse({ received: true });
+    return true;
+  }
+});
+
 /**
  * Get current page domain/URL
  */
@@ -537,6 +585,24 @@ function createAndShowPrompt(username, password, domain, isUpdate = false) {
       console.log(`[Autofill] Credentials ${isUpdate ? 'updated' : 'saved'} by user choice`);
       prompt.remove();
       showSaveConfirmation(isUpdate);
+      
+      // Check if OPAQUE is supported and trigger registration
+      const opaqueSupported = await checkOpaqueSupport();
+      if (opaqueSupported) {
+        console.log('[Autofill] OPAQUE supported - triggering auto-registration');
+        // Send message to background/popup to handle OPAQUE registration
+        chrome.runtime.sendMessage({
+          action: 'registerWithOpaque',
+          username: username,
+          password: password
+        }, (response) => {
+          if (response && response.success) {
+            console.log('[Autofill] OPAQUE registration completed successfully');
+          } else {
+            console.log('[Autofill] OPAQUE registration failed or not supported');
+          }
+        });
+      }
     } catch (error) {
       console.error('[Autofill] Failed to save credentials:', error);
     }
@@ -644,7 +710,180 @@ async function shouldNeverSave(domain) {
     });
   });
 }
+/**
+ * Check if OPAQUE is supported on current site
+ */
+async function checkOpaqueSupport() {
+  try {
+    const domain = getCurrentDomain();
+    const response = await fetch(`${domain}/o/check`, {
+      method: 'GET',
+      credentials: 'include'
+    });
+    
+    // If we get any response (even 401/403), OPAQUE is supported
+    console.log('[Autofill] OPAQUE endpoint accessible - OPAQUE is supported');
+    return true;
+  } catch (error) {
+    console.log('[Autofill] OPAQUE not supported on this site:', error.message);
+    return false;
+  }
+}
 
+/**
+ * Perform OPAQUE login directly from content script
+ * This sends a message to background script which handles the login
+ */
+async function performOpaqueLogin(username, password) {
+  return new Promise((resolve) => {
+    console.log('[Autofill] Requesting OPAQUE login for:', username);
+    
+    chrome.runtime.sendMessage({
+      action: 'performOpaqueLogin',
+      username: username,
+      password: password,
+      origin: getCurrentDomain()
+    }, (response) => {
+      if (response && response.success) {
+        console.log('[Autofill] OPAQUE login successful');
+        resolve(true);
+      } else {
+        console.error('[Autofill] OPAQUE login failed:', response?.error);
+        resolve(false);
+      }
+    });
+  });
+}
+
+/**
+ * Show badge indicating OPAQUE is available
+ */
+function showOpaqueAvailableBadge() {
+  // Remove existing badge if any
+  removeAutofillBadge();
+
+  // Create badge
+  autofillBadge = document.createElement('div');
+  autofillBadge.id = 'opaque-autofill-badge';
+  autofillBadge.innerHTML = `
+    <div class="badge-content">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+      </svg>
+      <span>OPAQUE Authentication Available</span>
+      <button id="opaque-signin-direct">Sign In with OPAQUE</button>
+    </div>
+  `;
+
+  // Add styles
+  const style = document.createElement('style');
+  style.textContent = `
+    #opaque-autofill-badge {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 999999;
+      background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      color: white;
+      padding: 12px 16px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 14px;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    #opaque-autofill-badge .badge-content {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #opaque-autofill-badge button {
+      background: white;
+      color: #11998e;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    #opaque-autofill-badge button:hover {
+      transform: scale(1.05);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    #opaque-autofill-badge button:active {
+      transform: scale(0.98);
+    }
+  `;
+
+  document.head.appendChild(style);
+  document.body.appendChild(autofillBadge);
+
+  // Add click handler to directly sign in with OPAQUE
+  const signInBtn = document.getElementById('opaque-signin-direct');
+  if (signInBtn) {
+    signInBtn.addEventListener('click', async () => {
+      console.log('[Autofill] Direct OPAQUE login initiated');
+      signInBtn.disabled = true;
+      signInBtn.textContent = 'Signing in...';
+      
+      try {
+        const credentials = await getStoredCredentials(getCurrentDomain());
+        if (credentials && credentials.username && credentials.password) {
+          // Trigger OPAQUE login directly
+          const success = await performOpaqueLogin(credentials.username, credentials.password);
+          
+          if (success) {
+            signInBtn.textContent = '✓ Success!';
+            setTimeout(() => {
+              removeAutofillBadge();
+              // Reload page to activate session
+              window.location.reload();
+            }, 1000);
+          } else {
+            signInBtn.textContent = '✗ Failed';
+            setTimeout(() => {
+              signInBtn.disabled = false;
+              signInBtn.textContent = 'Retry';
+            }, 2000);
+          }
+        }
+      } catch (error) {
+        console.error('[Autofill] OPAQUE login failed:', error);
+        signInBtn.textContent = '✗ Error';
+        setTimeout(() => {
+          signInBtn.disabled = false;
+          signInBtn.textContent = 'Retry';
+        }, 2000);
+      }
+    });
+  }
+
+  // Auto-hide after 15 seconds
+  setTimeout(() => {
+    if (autofillBadge) {
+      autofillBadge.style.opacity = '0';
+      autofillBadge.style.transition = 'opacity 0.3s';
+      setTimeout(() => removeAutofillBadge(), 300);
+    }
+  }, 15000);
+}
 /**
  * Monitor credential input fields and save to draft
  */
@@ -775,11 +1014,13 @@ function checkForDraftAndPrompt() {
  */
 async function init() {
   console.log('[Autofill] Initializing autofill system');
+  
+  // Inject page-level script for OPAQUE UI
+  injectPageScript();
 
   const credentials = await getStoredCredentials(getCurrentDomain());
   if (credentials) {
-    console.log('[Autofill] Stored credentials found, setting up focus detection');
-    localStorage.removeItem('opaque_credential_draft'); // Clear draft if credentials exist
+    console.log('[Autofill] Stored credentials found');
   }
   
   setupSPARouteDetection();
@@ -789,15 +1030,27 @@ async function init() {
   // Check for existing draft on page load and show prompt
   checkForDraftAndPrompt();
   
-  // Attempt auto-fill on page load
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', attemptAutofill);
+  // Check if OPAQUE is supported before auto-filling
+  const opaqueSupported = await checkOpaqueSupport();
+  
+  if (opaqueSupported && credentials) {
+    console.log('[Autofill] OPAQUE supported - page script will handle UI');
+    // Page script will show the "Sign in via OPAQUE" button
+    // Don't auto-fill in this case
   } else {
-    attemptAutofill();
-  }
+    // OPAQUE not supported or no credentials - proceed with normal autofill
+    console.log('[Autofill] Using standard autofill behavior');
+    
+    // Attempt auto-fill on page load
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', attemptAutofill);
+    } else {
+      attemptAutofill();
+    }
 
-  // Also try again after a short delay for dynamic content
-  setTimeout(attemptAutofill, 2000);
+    // Also try again after a short delay for dynamic content
+    setTimeout(attemptAutofill, 2000);
+  }
 }
 
 /**
@@ -837,6 +1090,61 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     clearDraft();
     sendResponse({ success: true });
     return true;
+  }
+  
+  if (request.action === 'getStoredCredentials') {
+    const domain = getCurrentDomain();
+    getStoredCredentials(domain)
+      .then(credentials => {
+        console.log('[Autofill] Credentials retrieved for popup');
+        sendResponse({ success: true, credentials });
+      })
+      .catch(error => {
+        console.error('[Autofill] Failed to get credentials:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Async response
+  }
+  
+  if (request.action === 'clearCredentials') {
+    const domain = getCurrentDomain();
+    chrome.storage.local.remove([`credentials_${domain}`], () => {
+      if (chrome.runtime.lastError) {
+        console.error('[Autofill] Failed to clear credentials:', chrome.runtime.lastError);
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+      } else {
+        console.log('[Autofill] Credentials cleared for domain:', domain);
+        sendResponse({ success: true });
+      }
+    });
+    return true; // Async response
+  }
+  
+  // Handle OPAQUE login execution request from background
+  if (request.action === 'executeOpaqueLogin') {
+    console.log('[Autofill] Received OPAQUE login request');
+    
+    const username = request.username;
+    const password = request.password;
+    
+    // Store login request for popup to handle
+    chrome.storage.local.set({
+      'pending_opaque_login': {
+        username: username,
+        password: password,
+        timestamp: Date.now()
+      }
+    }, () => {
+      console.log('[Autofill] Stored pending login, opening popup...');
+      
+      // Open the extension popup which will handle the login
+      chrome.runtime.sendMessage({ action: 'openPopupForLogin' }, (response) => {
+        // Popup will be opened, it will check for pending login
+        sendResponse({ success: true, queued: true, message: 'Login queued for popup' });
+      });
+    });
+    
+    return true; // Async response
   }
 });
 

@@ -2,7 +2,7 @@
 console.log('popup-ui.js loaded and executing');
 // const DJANGO_SERVER = 'https://steadfast-reprieve-production.up.railway.app';
 
-// Helper: Save credentials for autofill system
+// Helper: Save credentials for autofill system AND auto-register with OPAQUE if supported
 async function saveCredentialsForAutofill(username, password) {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -13,9 +13,62 @@ async function saveCredentialsForAutofill(username, password) {
         password: password
       });
       console.log('Credentials sent to autofill system:', response);
+      
+      // Check if OPAQUE is supported and auto-register
+      const opaqueSupported = await checkOpaqueSupport();
+      if (opaqueSupported) {
+        console.log('OPAQUE supported - auto-registering credentials...');
+        await autoRegisterWithOpaque(username, password);
+      } else {
+        console.log('OPAQUE not supported - credentials saved for autofill only');
+      }
     }
   } catch (error) {
     console.log('Could not send to autofill (tab may not be ready):', error.message);
+  }
+}
+
+// Helper: Auto-register credentials with OPAQUE backend
+async function autoRegisterWithOpaque(username, password) {
+  try {
+    console.log('[OPAQUE Auto-Register] Starting registration for:', username);
+    const api = await waitForOpaqueAPI();
+    
+    // Check if already registered (will throw if not)
+    try {
+      const existingPassword = await api.getPasswordFromStorage(username);
+      if (existingPassword) {
+        console.log('[OPAQUE Auto-Register] Credentials already registered, skipping');
+        return;
+      }
+    } catch (e) {
+      // User not registered, proceed with registration
+    }
+    
+    // Step 1: Start registration
+    const step1Result = await api.startRegistration(username, password);
+    console.log('[OPAQUE Auto-Register] Step 1 complete');
+    
+    // Step 2: Finish registration
+    const registrationResponse = typeof step1Result === 'string' 
+      ? step1Result 
+      : step1Result.registration_response;
+    
+    if (!registrationResponse) {
+      throw new Error('Server did not return registration_response');
+    }
+    
+    const step2Result = await api.finishRegistration(registrationResponse);
+    console.log('[OPAQUE Auto-Register] Registration complete:', step2Result);
+    
+    // Save password to storage
+    api.savePasswordToStorage(username, password);
+    console.log('[OPAQUE Auto-Register] Password saved to storage');
+    
+    updateStatus(`✓ Credentials registered with OPAQUE for ${username}`, 'success');
+  } catch (error) {
+    console.error('[OPAQUE Auto-Register] Failed:', error);
+    // Don't show error to user - autofill still works
   }
 }
 
@@ -65,6 +118,58 @@ async function triggerAutofill() {
     }
   } catch (error) {
     console.log('Could not trigger autofill:', error.message);
+    return false;
+  }
+}
+
+// Helper: Check if OPAQUE is supported on current site
+async function checkOpaqueSupport() {
+  try {
+    const api = await waitForOpaqueAPI();
+    const websiteOrigin = await api.getWebsiteOrigin();
+    
+    // Try to access OPAQUE endpoint
+    const response = await fetch(`${websiteOrigin}/o/session/verify`, {
+      method: 'GET',
+      credentials: 'include'
+    });
+    
+    // If we get any response (even 401/403), OPAQUE is supported
+    return true;
+  } catch (error) {
+    console.log('OPAQUE not supported on this site:', error.message);
+    return false;
+  }
+}
+
+// Helper: Get stored credentials for current domain
+async function getStoredCredentialsForCurrentSite() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'getStoredCredentials'
+      });
+      return response?.credentials || null;
+    }
+  } catch (error) {
+    console.log('Could not get stored credentials:', error.message);
+    return null;
+  }
+}
+
+// Helper: Clear credentials for current domain
+async function clearCredentialsForCurrentSite() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'clearCredentials'
+      });
+      return response?.success || false;
+    }
+  } catch (error) {
+    console.log('Could not clear credentials:', error.message);
     return false;
   }
 }
@@ -298,11 +403,130 @@ if (loginBtn) {
 window.addEventListener('DOMContentLoaded', async () => {
   console.log('Popup loaded, checking session status and credential draft...');
   
-  // Check for credential draft
+  // Check for pending OPAQUE registration requests first
+  try {
+    chrome.storage.local.get(['pending_opaque_registration'], async (result) => {
+      const pending = result.pending_opaque_registration;
+      if (pending && pending.username && pending.password) {
+        const age = Date.now() - pending.timestamp;
+        
+        // Only process if less than 5 minutes old
+        if (age < 5 * 60 * 1000) {
+          console.log('[Popup] Processing pending OPAQUE registration:', pending.username);
+          
+          try {
+            await autoRegisterWithOpaque(pending.username, pending.password);
+            console.log('[Popup] Pending registration processed successfully');
+          } catch (error) {
+            console.error('[Popup] Failed to process pending registration:', error);
+          }
+        }
+        
+        // Clear the pending request
+        chrome.storage.local.remove(['pending_opaque_registration']);
+      }
+    });
+  } catch (error) {
+    console.log('[Popup] Error checking pending registrations:', error.message);
+  }
+  
+  // Check for pending OPAQUE login requests
+  try {
+    chrome.storage.local.get(['pending_opaque_login'], async (result) => {
+      const pending = result.pending_opaque_login;
+      if (pending && pending.username && pending.password) {
+        const age = Date.now() - pending.timestamp;
+        
+        // Only process if less than 5 minutes old
+        if (age < 5 * 60 * 1000) {
+          console.log('[Popup] Processing pending OPAQUE login:', pending.username);
+          updateStatus('Processing automatic OPAQUE login...', 'info');
+          
+          try {
+            const api = await waitForOpaqueAPI();
+            
+            // Step 1: Start login
+            const step1Result = await api.startLogin(pending.username, pending.password);
+            console.log('[Popup] Login Step 1 complete');
+            
+            // Step 2: Finish login
+            const step2Result = await api.finishLogin(
+              step1Result.client_response,
+              step1Result.cache_key
+            );
+            console.log('[Popup] Login Step 2 complete');
+            
+            // Verify session
+            const sessionCheck = await api.verifySession();
+            const websiteOrigin = await api.getWebsiteOrigin();
+            
+            if (sessionCheck.authenticated) {
+              updateStatus('✓ Automatic login successful!', 'success');
+              console.log('[Popup] Automatic login successful');
+              
+              // Send success result back to content script
+              chrome.runtime.sendMessage({
+                type: 'opaque-login-complete',
+                data: {
+                  success: true,
+                  username: pending.username,
+                  redirectUrl: `${websiteOrigin}/o/session/redirect`,
+                  message: 'Login successful'
+                }
+              }, () => {
+                if (chrome.runtime.lastError) {
+                  console.error('[Popup] Failed to send result:', chrome.runtime.lastError);
+                }
+              });
+              
+              // Close popup after a brief delay
+              setTimeout(() => {
+                window.close();
+              }, 1500);
+            } else {
+              updateStatus('⚠ Login completed but verification failed', 'warning');
+              
+              // Send failure result
+              chrome.runtime.sendMessage({
+                type: 'opaque-login-complete',
+                data: {
+                  success: false,
+                  error: 'Session verification failed',
+                  message: 'Login completed but session verification failed'
+                }
+              });
+            }
+          } catch (error) {
+            console.error('[Popup] Failed to process pending login:', error);
+            updateStatus(`✗ Automatic login failed: ${error.message}`, 'error');
+            
+            // Send failure result
+            chrome.runtime.sendMessage({
+              type: 'opaque-login-complete',
+              data: {
+                success: false,
+                error: error.message,
+                message: `Login failed: ${error.message}`
+              }
+            });
+          }
+        }
+        
+        // Clear the pending request
+        chrome.storage.local.remove(['pending_opaque_login']);
+      }
+    });
+  } catch (error) {
+    console.log('[Popup] Error checking pending logins:', error.message);
+  }
+  
+  // Check for credential draft first
+  let hasDraft = false;
   try {
     const draft = await getCredentialDraft();
     if (draft && draft.username && draft.password) {
       console.log('Credential draft found:', { domain: draft.domain, username: draft.username });
+      hasDraft = true;
       
       // Show draft notification
       const draftNotification = document.getElementById('draftNotification');
@@ -367,15 +591,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   
   // Check session status
+  let isAuthenticated = false;
   try {
     const api = await waitForOpaqueAPI();
     const sessionCheck = await api.verifySession();
     
     if (sessionCheck.authenticated) {
       console.log('Active session found:', sessionCheck);
+      isAuthenticated = true;
       // Only show if no draft notification is visible
-      const draftNotification = document.getElementById('draftNotification');
-      if (!draftNotification || !draftNotification.classList.contains('show')) {
+      if (!hasDraft) {
         updateStatus(`✓ Logged in as ${sessionCheck.email}`, 'success');
       }
     } else {
@@ -383,6 +608,124 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   } catch (error) {
     console.log('Session check skipped:', error.message);
+  }
+  
+  // If not authenticated and no draft, check for OPAQUE auto-login opportunity
+  if (!isAuthenticated) {
+    try {
+      const credentials = await getStoredCredentialsForCurrentSite();
+      
+      if (credentials && credentials.username && credentials.password) {
+        console.log('Stored credentials found, checking OPAQUE support...');
+        
+        const opaqueSupported = await checkOpaqueSupport();
+        
+        if (opaqueSupported) {
+          console.log('OPAQUE is supported, showing auto-login prompt');
+          
+          // Show OPAQUE login prompt
+          const opaquePrompt = document.getElementById('opaquePrompt');
+          const opaqueUsernameDisplay = document.getElementById('opaqueUsername');
+          
+          if (opaquePrompt && opaqueUsernameDisplay) {
+            opaqueUsernameDisplay.textContent = `👤 ${credentials.username}`;
+            opaquePrompt.classList.add('show');
+            
+            // Handle "Sign In" button
+            const signInOpaqueBtn = document.getElementById('signInOpaqueBtn');
+            if (signInOpaqueBtn) {
+              signInOpaqueBtn.addEventListener('click', async () => {
+                console.log('Auto-login with OPAQUE initiated...');
+                opaquePrompt.classList.remove('show');
+                
+                try {
+                  updateStatus('Logging in with OPAQUE...', 'info');
+                  const api = await waitForOpaqueAPI();
+                  
+                  // Step 1: Start login
+                  const step1Result = await api.startLogin(credentials.username, credentials.password);
+                  console.log('Step 1 response:', step1Result);
+                  
+                  // Step 2: Finish login
+                  updateStatus('Completing login...', 'info');
+                  const step2Result = await api.finishLogin(
+                    step1Result.client_response,
+                    step1Result.cache_key
+                  );
+                  console.log('Step 2 response:', step2Result);
+                  
+                  // Verify session
+                  const sessionCheck = await api.verifySession();
+                  const websiteOrigin = await api.getWebsiteOrigin();
+                  
+                  if (sessionCheck.authenticated) {
+                    updateStatus(`✓ Login successful! Opening site...`, 'success');
+                    setTimeout(() => {
+                      chrome.tabs.create({ url: `${websiteOrigin}/o/session/redirect` });
+                    }, 1000);
+                  } else {
+                    updateStatus(`⚠ Login completed but verification failed`, 'warning');
+                  }
+                } catch (error) {
+                  console.error('Auto-login error:', error);
+                  updateStatus(`✗ Login failed: ${error.message}`, 'error');
+                }
+              });
+            }
+            
+            // Handle "Dismiss" button
+            const dismissOpaqueBtn = document.getElementById('dismissOpaqueBtn');
+            if (dismissOpaqueBtn) {
+              dismissOpaqueBtn.addEventListener('click', () => {
+                console.log('OPAQUE auto-login dismissed');
+                opaquePrompt.classList.remove('show');
+                updateStatus('Autofill available instead', 'info');
+                setTimeout(() => {
+                  const statusDiv = document.getElementById('status');
+                  if (statusDiv) statusDiv.classList.remove('show');
+                }, 2000);
+              });
+            }
+          }
+        } else {
+          console.log('OPAQUE not supported, autofill available');
+          updateStatus('💡 Autofill available for this site', 'info');
+          setTimeout(() => {
+            const statusDiv = document.getElementById('status');
+            if (statusDiv) statusDiv.classList.remove('show');
+          }, 3000);
+        }
+      }
+    } catch (error) {
+      console.log('Auto-login check failed:', error.message);
+    }
+  } else {
+    console.log('User is authenticated or draft exists; skipping auto-login check');
+  }
+  
+  // Setup clear credentials button
+  const clearCredentialsBtn = document.getElementById('clearCredentialsBtn');
+  if (clearCredentialsBtn) {
+    clearCredentialsBtn.addEventListener('click', async () => {
+      console.log('Clear credentials button clicked');
+      
+      if (confirm('Clear all saved credentials for this site? This cannot be undone.')) {
+        updateStatus('Clearing credentials...', 'info');
+        
+        try {
+          const success = await clearCredentialsForCurrentSite();
+          
+          if (success) {
+            updateStatus('✓ Credentials cleared successfully', 'success');
+          } else {
+            updateStatus('⚠ No credentials found to clear', 'warning');
+          }
+        } catch (error) {
+          console.error('Failed to clear credentials:', error);
+          updateStatus(`✗ Failed to clear: ${error.message}`, 'error');
+        }
+      }
+    });
   }
 });
 

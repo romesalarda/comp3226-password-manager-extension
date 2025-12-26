@@ -55,6 +55,13 @@ await esbuild
   })
   .catch(() => process.exit(1));
 
+await esbuild
+  .build({
+    ...buildOptions,
+    entryPoints: ["src/nonce_injection/opaque-login-injected.js"],
+    outfile: "nonce_injection/opaque-login-injected.js",
+  })
+  .catch(() => process.exit(1));
 // Build autofill content script
 await esbuild
   .build({
@@ -63,5 +70,12 @@ await esbuild
     outfile: "autofill.js",
   })
   .catch(() => process.exit(1));
-
+  
+await esbuild
+  .build({
+    ...buildOptions,
+    entryPoints: ["src/opaque-page-injected.js"],
+    outfile: "opaque-page-injected.js",
+  })
+  .catch(() => process.exit(1));
 console.log("Build complete! ✓");

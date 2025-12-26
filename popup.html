@@ -100,6 +100,79 @@
       background: rgba(255, 255, 255, 0.3);
     }
     
+    #opaquePrompt {
+      display: none;
+      background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      animation: slideIn 0.3s ease-out;
+    }
+    
+    #opaquePrompt.show {
+      display: block;
+    }
+    
+    #opaquePrompt h4 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    #opaquePrompt p {
+      margin: 0 0 12px 0;
+      font-size: 12px;
+      opacity: 0.95;
+    }
+    
+    #opaquePrompt .opaque-username {
+      background: rgba(255, 255, 255, 0.2);
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+    
+    #opaquePrompt .opaque-actions {
+      display: flex;
+      gap: 8px;
+    }
+    
+    #opaquePrompt button {
+      flex: 1;
+      padding: 8px;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    #signInOpaqueBtn {
+      background: white;
+      color: #11998e;
+    }
+    
+    #signInOpaqueBtn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    
+    #dismissOpaqueBtn {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    
+    #dismissOpaqueBtn:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+    
     .form-group {
       margin-bottom: 12px;
     }
@@ -198,6 +271,25 @@
       border: 1px solid #ffeaa7;
     }
     
+    #clearCredentialsBtn {
+      width: 100%;
+      padding: 8px;
+      background: #f44336;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 10px;
+    }
+    
+    #clearCredentialsBtn:hover {
+      background: #d32f2f;
+      transform: translateY(-1px);
+    }
+    
     .divider {
       margin: 15px 0;
       border-top: 1px solid #e0e0e0;
@@ -235,6 +327,21 @@
     </div>
   </div>
   
+  <div id="opaquePrompt">
+    <h4>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+      </svg>
+      OPAQUE Authentication Available
+    </h4>
+    <p>This website supports OPAQUE authentication. Sign in securely?</p>
+    <div class="opaque-username" id="opaqueUsername">👤 username</div>
+    <div class="opaque-actions">
+      <button id="signInOpaqueBtn">🔐 Sign In</button>
+      <button id="dismissOpaqueBtn">✖ Dismiss</button>
+    </div>
+  </div>
+  
   <div class="form-group">
     <label for="email">Email</label>
     <input type="email" id="email" placeholder="user@example.com" autocomplete="email">
@@ -253,6 +360,8 @@
   <div class="divider">
     <span>or</span>
   </div>
+  
+  <button id="clearCredentialsBtn">🗑️ Clear Saved Credentials</button>
     
   <div id="status"></div>
 

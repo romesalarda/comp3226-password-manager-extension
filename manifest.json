@@ -38,7 +38,12 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["nonce_injection/injected.js"],
+      "resources": [
+        "nonce_injection/injected.js",
+        "nonce_injection/opaque-login-injected.js",
+        "opaque-page-injected.js",
+        "opaque.js"
+      ],
       "matches": ["<all_urls>"]
     }
   ],
