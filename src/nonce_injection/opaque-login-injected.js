@@ -15,6 +15,14 @@ window.addEventListener('message', async (event) => {
       // Dynamically import OPAQUE library
       const opaqueModule = await import(chrome.runtime.getURL('opaque.js'));
       const opaque = opaqueModule.default || opaqueModule;
+
+      if (!opaque || !opaque.client || !opaque.client.startLogin || !opaque.client.finishLogin) {
+        throw new Error('OPAQUE module or client methods are not available');
+      }
+
+      if (!password) {
+        throw new Error('Please provide a password for OPAQUE login');
+      }
       
       // Step 1: Start login
       const { clientLoginState, startLoginRequest } = opaque.client.startLogin({ 

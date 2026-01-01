@@ -286,9 +286,7 @@
       } catch (error) {
         console.error("Login error:", error);
         if (error.message.includes("404") || error.message.includes("not found")) {
-          updateStatus("\u26A0 OPAQUE not supported. Using standard autofill fallback.", "warning");
-          await saveCredentialsForAutofill(email, password);
-          console.log("[Fallback] Credentials saved for autofill (OPAQUE not available)");
+          updateStatus("\u2717 Login failed: Username or password incorrect", "error");
         } else {
           updateStatus(`\u2717 Login failed: ${error.message}`, "error");
         }
@@ -299,6 +297,22 @@
   }
   window.addEventListener("DOMContentLoaded", async () => {
     console.log("Popup loaded, checking session status and credential draft...");
+    const opaqueSupported = await checkOpaqueSupport();
+    const opaqueForm = document.getElementById("opaqueForm");
+    const autofillOnly = document.getElementById("autofillOnly");
+    if (opaqueSupported) {
+      console.log("OPAQUE supported - showing registration/login form");
+      if (opaqueForm)
+        opaqueForm.classList.add("show");
+      if (autofillOnly)
+        autofillOnly.classList.remove("show");
+    } else {
+      console.log("OPAQUE not supported - hiding form, showing autofill-only message");
+      if (opaqueForm)
+        opaqueForm.classList.remove("show");
+      if (autofillOnly)
+        autofillOnly.classList.add("show");
+    }
     try {
       chrome.storage.local.get(["pending_opaque_registration"], async (result) => {
         const pending = result.pending_opaque_registration;
@@ -459,8 +473,8 @@
         const credentials = await getStoredCredentialsForCurrentSite();
         if (credentials && credentials.username && credentials.password) {
           console.log("Stored credentials found, checking OPAQUE support...");
-          const opaqueSupported = await checkOpaqueSupport();
-          if (opaqueSupported) {
+          const opaqueSupported2 = await checkOpaqueSupport();
+          if (opaqueSupported2) {
             console.log("OPAQUE is supported, showing auto-login prompt");
             const opaquePrompt = document.getElementById("opaquePrompt");
             const opaqueUsernameDisplay = document.getElementById("opaqueUsername");

@@ -201,6 +201,14 @@ async function startLogin(email, password) {
     // Store email and password in state for step 2
     opaqueState.loginEmail = email;
     opaqueState.loginPassword = password;
+
+    if (!password || password.length === 0) {
+      throw new Error("Please provide a password for OPAQUE login");
+    }
+
+    if (!email || email.length === 0) {
+      throw new Error("Please provide an email for OPAQUE login");
+    }
     
     // Start OPAQUE login
     const { clientLoginState, startLoginRequest } =

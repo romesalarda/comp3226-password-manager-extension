@@ -642,6 +642,12 @@ ${val.stack}`;
       opaqueState.clearLoginState();
       opaqueState.loginEmail = email;
       opaqueState.loginPassword = password;
+      if (!password || password.length === 0) {
+        throw new Error("Please provide a password for OPAQUE login");
+      }
+      if (!email || email.length === 0) {
+        throw new Error("Please provide an email for OPAQUE login");
+      }
       const { clientLoginState, startLoginRequest } = client.startLogin({ password });
       opaqueState.clientLoginState = clientLoginState;
       console.log("Login request created:", startLoginRequest);

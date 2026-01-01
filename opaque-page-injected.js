@@ -52,28 +52,43 @@
     if (document.getElementById("opaque-signin-badge")) {
       return;
     }
+    function addDismissButton(badge2) {
+      const existingBtn = badge2.querySelector("#opaque-dismiss-btn");
+      if (existingBtn) {
+        existingBtn.remove();
+      }
+      const dismissBtn = document.createElement("button");
+      dismissBtn.id = "opaque-dismiss-btn";
+      dismissBtn.title = "Dismiss";
+      dismissBtn.style.cssText = "background: none; border: none; color: white; cursor: pointer; padding: 0; margin-left: 8px; display: flex; align-items: center; opacity: 0.7; transition: opacity 0.2s;";
+      dismissBtn.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
+    `;
+      dismissBtn.addEventListener("mouseenter", (e) => {
+        e.stopPropagation();
+        dismissBtn.style.opacity = "1";
+      });
+      dismissBtn.addEventListener("mouseleave", (e) => {
+        e.stopPropagation();
+        dismissBtn.style.opacity = "0.7";
+      });
+      dismissBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        console.log("[OPAQUE Page] User dismissed sign in button");
+        badge2.style.opacity = "0";
+        badge2.style.transform = "translateY(-10px)";
+        setTimeout(() => {
+          badge2.remove();
+        }, 200);
+      });
+      badge2.appendChild(dismissBtn);
+    }
     const badge = document.createElement("div");
     badge.id = "opaque-signin-badge";
-    badge.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 12px 24px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    z-index: 999999;
-    transition: all 0.2s ease;
-    border: none;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  `;
+    badge.style.cssText = 'position: fixed; top: 20px; right: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px; font-weight: 600; cursor: pointer; z-index: 999999; transition: all 0.2s ease; border: none; display: flex; align-items: center; gap: 8px;';
     badge.innerHTML = `
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M12 2L2 7l10 5 10-5-10-5z"/>
@@ -82,6 +97,7 @@
     </svg>
     <span>Sign in via OPAQUE</span>
   `;
+    addDismissButton(badge);
     badge.addEventListener("mouseenter", () => {
       badge.style.transform = "translateY(-2px)";
       badge.style.boxShadow = "0 6px 16px rgba(0,0,0,0.2)";
@@ -106,9 +122,41 @@
           origin: window.location.origin
         }
       }));
+      setTimeout(() => {
+        if (badge.querySelector("span")?.textContent === "Opening...") {
+          console.log("[OPAQUE Page] Login timeout - resetting button");
+          badge.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+          <span>Sign in via OPAQUE</span>
+        `;
+          addDismissButton(badge);
+          badge.style.opacity = "1";
+          badge.style.cursor = "pointer";
+        }
+      }, 1e4);
     });
     document.body.appendChild(badge);
     console.log("[OPAQUE Page] Sign in button added to page");
+    window.addEventListener("focus", () => {
+      if (badge.querySelector("span")?.textContent === "Opening...") {
+        console.log("[OPAQUE Page] Page regained focus with stuck button - resetting");
+        badge.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+        <span>Sign in via OPAQUE</span>
+      `;
+        addDismissButton(badge);
+        badge.style.opacity = "1";
+        badge.style.cursor = "pointer";
+      }
+    });
   }
   window.addEventListener("OPAQUE:Complete", (event) => {
     console.log("[OPAQUE Page] Received login completion:", event.detail);
@@ -150,6 +198,37 @@
           </svg>
           <span>Sign in via OPAQUE</span>
         `;
+          const existingBtn = badge.querySelector("#opaque-dismiss-btn");
+          if (!existingBtn) {
+            const dismissBtn = document.createElement("button");
+            dismissBtn.id = "opaque-dismiss-btn";
+            dismissBtn.title = "Dismiss";
+            dismissBtn.style.cssText = "background: none; border: none; color: white; cursor: pointer; padding: 0; margin-left: 8px; display: flex; align-items: center; opacity: 0.7; transition: opacity 0.2s;";
+            dismissBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          `;
+            dismissBtn.addEventListener("mouseenter", (e) => {
+              e.stopPropagation();
+              dismissBtn.style.opacity = "1";
+            });
+            dismissBtn.addEventListener("mouseleave", (e) => {
+              e.stopPropagation();
+              dismissBtn.style.opacity = "0.7";
+            });
+            dismissBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              console.log("[OPAQUE Page] User dismissed sign in button");
+              badge.style.opacity = "0";
+              badge.style.transform = "translateY(-10px)";
+              setTimeout(() => {
+                badge.remove();
+              }, 200);
+            });
+            badge.appendChild(dismissBtn);
+          }
           badge.style.background = "linear-gradient(135deg, #667eea 0%, #764ba2 100%)";
           badge.style.opacity = "1";
           badge.style.cursor = "pointer";

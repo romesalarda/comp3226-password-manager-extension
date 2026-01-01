@@ -391,10 +391,7 @@ if (loginBtn) {
       
       // Check if OPAQUE is not supported (404 or similar)
       if (error.message.includes('404') || error.message.includes('not found')) {
-        updateStatus('⚠ OPAQUE not supported. Using standard autofill fallback.', 'warning');
-        // Still save credentials for autofill
-        await saveCredentialsForAutofill(email, password);
-        console.log('[Fallback] Credentials saved for autofill (OPAQUE not available)');
+        updateStatus('✗ Login failed: Username or password incorrect', 'error');
       } else {
         updateStatus(`✗ Login failed: ${error.message}`, 'error');
       }
@@ -407,6 +404,21 @@ if (loginBtn) {
 // Add session check and draft check on popup load
 window.addEventListener('DOMContentLoaded', async () => {
   console.log('Popup loaded, checking session status and credential draft...');
+  
+  // Check OPAQUE support first and show/hide form accordingly
+  const opaqueSupported = await checkOpaqueSupport();
+  const opaqueForm = document.getElementById('opaqueForm');
+  const autofillOnly = document.getElementById('autofillOnly');
+  
+  if (opaqueSupported) {
+    console.log('OPAQUE supported - showing registration/login form');
+    if (opaqueForm) opaqueForm.classList.add('show');
+    if (autofillOnly) autofillOnly.classList.remove('show');
+  } else {
+    console.log('OPAQUE not supported - hiding form, showing autofill-only message');
+    if (opaqueForm) opaqueForm.classList.remove('show');
+    if (autofillOnly) autofillOnly.classList.add('show');
+  }
   
   // Check for pending OPAQUE registration requests first
   try {

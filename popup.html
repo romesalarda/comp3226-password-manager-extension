@@ -307,6 +307,33 @@
       color: #999;
       text-transform: uppercase;
     }
+    
+    #opaqueForm {
+      display: none;
+    }
+    
+    #opaqueForm.show {
+      display: block;
+    }
+    
+    #autofillOnly {
+      display: none;
+      text-align: center;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+    
+    #autofillOnly.show {
+      display: block;
+    }
+    
+    #autofillOnly p {
+      margin: 0 0 10px 0;
+      color: #666;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -342,23 +369,30 @@
     </div>
   </div>
   
-  <div class="form-group">
-    <label for="email">Email</label>
-    <input type="email" id="email" placeholder="user@example.com" autocomplete="email">
+  <div id="opaqueForm">
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="user@example.com" autocomplete="email">
+    </div>
+    
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="Enter password" autocomplete="current-password">
+    </div>
+    
+    <div class="button-group">
+      <button id="registerBtn">Register</button>
+      <button id="loginBtn">Login</button>
+    </div>
+    
+    <div class="divider">
+      <span>or</span>
+    </div>
   </div>
   
-  <div class="form-group">
-    <label for="password">Password</label>
-    <input type="password" id="password" placeholder="Enter password" autocomplete="current-password">
-  </div>
-  
-  <div class="button-group">
-    <button id="registerBtn">Register</button>
-    <button id="loginBtn">Login</button>
-  </div>
-  
-  <div class="divider">
-    <span>or</span>
+  <div id="autofillOnly">
+    <p>🔒 OPAQUE authentication not available on this site</p>
+    <p style="font-size: 11px; color: #999;">Autofill credentials are managed automatically</p>
   </div>
   
   <button id="clearCredentialsBtn">🗑️ Clear Saved Credentials</button>
