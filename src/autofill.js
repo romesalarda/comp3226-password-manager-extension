@@ -720,10 +720,14 @@ async function checkOpaqueSupport() {
       method: 'GET',
       credentials: 'include'
     });
-    
-    // If we get any response (even 401/403), OPAQUE is supported
-    console.log('[Autofill] OPAQUE endpoint accessible - OPAQUE is supported');
-    return true;
+
+    if (response) {
+      const data = await response.json();
+      if (data.opaque_supported) {
+        console.log('[Autofill] OPAQUE endpoint accessible - OPAQUE is supported');
+        return true;
+      }
+    }
   } catch (error) {
     console.log('[Autofill] OPAQUE not supported on this site:', error.message);
     return false;

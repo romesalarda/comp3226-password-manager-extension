@@ -7,7 +7,9 @@ console.log('[OPAQUE Page] Page-level injected script loaded');
 // Check if OPAQUE is supported on this site
 async function checkOpaqueSupport() {
   try {
-    const response = await fetch('/o/check', {
+    // TODO: get the correct endpoint URL dynamically if needed
+    const siteOrigin = window.location.origin;
+    const response = await fetch(`${siteOrigin}/o/check`, {
       method: 'GET',
       credentials: 'include',
       headers: {
@@ -15,9 +17,12 @@ async function checkOpaqueSupport() {
       }
     });
     
-    if (response.ok) {
-      console.log('[OPAQUE Page] OPAQUE endpoints detected on this site');
-      return true;
+    if (response.status === 200 && response.headers.get('content-type') && response.headers.get('content-type').includes('application/json')) {
+      const data = await response.json();
+      if (data.opaque_supported) {
+        console.log('[OPAQUE Page] OPAQUE endpoints detected on this site');
+        return true;
+      }
     }
   } catch (error) {
     console.log('[OPAQUE Page] No OPAQUE support on this site');
