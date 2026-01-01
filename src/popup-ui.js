@@ -133,8 +133,13 @@ async function checkOpaqueSupport() {
       method: 'GET',
       credentials: 'include'
     });
-    
-    // If we get any response (even 401/403), OPAQUE is supported
+    if (response) {
+      const data = await response.json();
+      if (data.opaque_supported) {
+        console.log('OPAQUE endpoint accessible - OPAQUE is supported');
+        return true;
+      }
+    }
     return true;
   } catch (error) {
     console.log('OPAQUE not supported on this site:', error.message);
@@ -531,8 +536,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       // Show draft notification
       const draftNotification = document.getElementById('draftNotification');
       const draftUsernameDisplay = document.getElementById('draftUsername');
+
+      const credentials = await getStoredCredentialsForCurrentSite();
       
-      if (draftNotification && draftUsernameDisplay) {
+      if (draftNotification && draftUsernameDisplay && credentials === null) {
         draftUsernameDisplay.textContent = `👤 ${draft.username}`;
         draftNotification.classList.add('show');
         

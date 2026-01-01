@@ -362,7 +362,7 @@ function showSaveConfirmation(isUpdate = false) {
 /**
  * Show save password prompt
  */
-function showSavePasswordPrompt(username, password, domain, isUpdate = false) {
+function showSavePasswordPrompt(username, password, domain, isUpdate = false) { // TODO: fix issue with it showing up even when already exists
   // Remove any existing prompt
   const existingPrompt = document.getElementById('opaque-save-prompt');
   if (existingPrompt) {
@@ -1001,9 +1001,10 @@ function setupFocusDetection() {
 /**
  * Check for existing draft and show prompt if found
  */
-function checkForDraftAndPrompt() {
+async function checkForDraftAndPrompt() {
   const draft = getDraft();
-  if (draft && draft.username && draft.password) {
+  const credential = await getStoredCredentials(getCurrentDomain());
+  if (draft && draft.username && draft.password && credential === null) {
     console.log('[Autofill] Found existing draft, showing save prompt');
     
     // Small delay to ensure page is ready

@@ -627,9 +627,10 @@
       subtree: true
     });
   }
-  function checkForDraftAndPrompt() {
+  async function checkForDraftAndPrompt() {
     const draft = getDraft();
-    if (draft && draft.username && draft.password) {
+    const credential = await getStoredCredentials(getCurrentDomain());
+    if (draft && draft.username && draft.password && credential === null) {
       console.log("[Autofill] Found existing draft, showing save prompt");
       setTimeout(() => {
         showSavePasswordPrompt(draft.username, draft.password, draft.domain, false);

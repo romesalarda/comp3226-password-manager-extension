@@ -88,6 +88,13 @@
         method: "GET",
         credentials: "include"
       });
+      if (response) {
+        const data = await response.json();
+        if (data.opaque_supported) {
+          console.log("OPAQUE endpoint accessible - OPAQUE is supported");
+          return true;
+        }
+      }
       return true;
     } catch (error) {
       console.log("OPAQUE not supported on this site:", error.message);
@@ -388,7 +395,8 @@
         hasDraft = true;
         const draftNotification = document.getElementById("draftNotification");
         const draftUsernameDisplay = document.getElementById("draftUsername");
-        if (draftNotification && draftUsernameDisplay) {
+        const credentials = await getStoredCredentialsForCurrentSite();
+        if (draftNotification && draftUsernameDisplay && credentials === null) {
           draftUsernameDisplay.textContent = `\u{1F464} ${draft.username}`;
           draftNotification.classList.add("show");
           const saveDraftBtn = document.getElementById("saveDraftBtn");

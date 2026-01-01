@@ -23,6 +23,7 @@
     }
     return false;
   }
+
   function showOpaqueLoginButton() {
     if (document.getElementById("opaque-signin-badge")) {
       return;
@@ -132,11 +133,13 @@
       }
     }
   });
+  
   async function init() {
     console.log("[OPAQUE Page] Initializing OPAQUE page script");
     const isSupported = await checkOpaqueSupport();
     if (isSupported) {
       const hasCredentials = localStorage.getItem("opaque_username") !== null;
+      
       showOpaqueLoginButton();
       if (hasCredentials) {
         console.log("[OPAQUE Page] OPAQUE supported and credentials found");
