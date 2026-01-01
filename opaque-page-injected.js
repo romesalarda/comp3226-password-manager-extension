@@ -23,7 +23,31 @@
     }
     return false;
   }
-
+  async function checkLoginStatus() {
+    try {
+      const siteOrigin = window.location.origin;
+      const response = await fetch(`${siteOrigin}/o/session/verify`, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+      if (response.status === 200 && response.headers.get("content-type") && response.headers.get("content-type").includes("application/json")) {
+        const data = await response.json();
+        if (data.authenticated !== void 0) {
+          return data.authenticated;
+        }
+      }
+      const cookies = document.cookie;
+      const hasSessionCookie = cookies.includes("sessionid");
+      console.log("[OPAQUE Page] Login status check - has session cookies:", hasSessionCookie);
+      return hasSessionCookie;
+    } catch (error) {
+      console.log("[OPAQUE Page] Error checking login status:", error);
+      return false;
+    }
+  }
   function showOpaqueLoginButton() {
     if (document.getElementById("opaque-signin-badge")) {
       return;
@@ -133,18 +157,37 @@
       }
     }
   });
-  
+  function checkStoredCredentials() {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        console.log("[OPAQUE Page] Credential check timed out");
+        resolve(false);
+      }, 2e3);
+      const handler = (event) => {
+        clearTimeout(timeout);
+        window.removeEventListener("OPAQUE:CredentialsStatus", handler);
+        console.log("[OPAQUE Page] Received credentials status:", event.detail);
+        resolve(event.detail.hasCredentials);
+      };
+      window.addEventListener("OPAQUE:CredentialsStatus", handler);
+      window.dispatchEvent(new CustomEvent("OPAQUE:CheckCredentials", {
+        detail: { timestamp: Date.now() }
+      }));
+    });
+  }
   async function init() {
     console.log("[OPAQUE Page] Initializing OPAQUE page script");
     const isSupported = await checkOpaqueSupport();
     if (isSupported) {
-      const hasCredentials = localStorage.getItem("opaque_username") !== null;
-      
-      showOpaqueLoginButton();
-      if (hasCredentials) {
-        console.log("[OPAQUE Page] OPAQUE supported and credentials found");
-      } else {
-        console.log("[OPAQUE Page] OPAQUE supported but no credentials stored");
+      const hasCredentials = await checkStoredCredentials();
+      const isLoggedIn = await checkLoginStatus();
+      if (hasCredentials && !isLoggedIn) {
+        console.log("[OPAQUE Page] OPAQUE supported, credentials exist, but user not logged in - showing login button");
+        showOpaqueLoginButton();
+      } else if (hasCredentials && isLoggedIn) {
+        console.log("[OPAQUE Page] User already logged in - not showing button");
+      } else if (!hasCredentials) {
+        console.log("[OPAQUE Page] No credentials stored - not showing button");
       }
     } else {
       console.log("[OPAQUE Page] OPAQUE not supported on this site, no action taken");

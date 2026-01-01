@@ -15,6 +15,16 @@
     };
     (document.head || document.documentElement).appendChild(script);
   }
+  window.addEventListener("OPAQUE:CheckCredentials", async (event) => {
+    console.log("[Autofill] Received OPAQUE:CheckCredentials from page");
+    const domain = getCurrentDomain();
+    const credentials = await getStoredCredentials(domain);
+    const hasCredentials = credentials !== null;
+    console.log("[Autofill] Has credentials for domain:", hasCredentials);
+    window.dispatchEvent(new CustomEvent("OPAQUE:CredentialsStatus", {
+      detail: { hasCredentials }
+    }));
+  });
   window.addEventListener("OPAQUE:RequestLogin", (event) => {
     console.log("[Autofill] Received OPAQUE:RequestLogin from page", event.detail);
     chrome.runtime.sendMessage({

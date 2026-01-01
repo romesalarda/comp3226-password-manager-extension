@@ -30,6 +30,42 @@ async function checkOpaqueSupport() {
   return false;
 }
 
+// Check if user is currently logged in
+async function checkLoginStatus() {
+  try {
+    const siteOrigin = window.location.origin;
+    // Try to access a protected endpoint or check session status
+    const response = await fetch(`${siteOrigin}/o/session/verify`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+
+    if (response.status === 200 && 
+        response.headers.get('content-type') && 
+        response.headers.get('content-type').includes('application/json')) {
+      const data = await response.json();
+      // Check if the response includes authentication status
+      if (data.authenticated !== undefined) {
+        return data.authenticated;
+      }
+    }
+    
+    // Fallback: check for common session indicators
+    // If we get a 200 response and there are cookies, we might be logged in
+    const cookies = document.cookie;
+    const hasSessionCookie = cookies.includes('sessionid')
+    
+    console.log('[OPAQUE Page] Login status check - has session cookies:', hasSessionCookie);
+    return hasSessionCookie;
+  } catch (error) {
+    console.log('[OPAQUE Page] Error checking login status:', error);
+    return false;
+  }
+}
+
 // Show "Sign in via OPAQUE" button in the page
 function showOpaqueLoginButton() {
   // Check if button already exists
@@ -160,6 +196,30 @@ window.addEventListener('OPAQUE:Complete', (event) => {
   }
 });
 
+// Request credential check from content script
+function checkStoredCredentials() {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      console.log('[OPAQUE Page] Credential check timed out');
+      resolve(false);
+    }, 2000);
+
+    const handler = (event) => {
+      clearTimeout(timeout);
+      window.removeEventListener('OPAQUE:CredentialsStatus', handler);
+      console.log('[OPAQUE Page] Received credentials status:', event.detail);
+      resolve(event.detail.hasCredentials);
+    };
+
+    window.addEventListener('OPAQUE:CredentialsStatus', handler);
+    
+    // Request credential check from content script
+    window.dispatchEvent(new CustomEvent('OPAQUE:CheckCredentials', {
+      detail: { timestamp: Date.now() }
+    }));
+  });
+}
+
 // Initialize on page load
 async function init() {
   console.log('[OPAQUE Page] Initializing OPAQUE page script');
@@ -168,14 +228,17 @@ async function init() {
   const isSupported = await checkOpaqueSupport();
   
   if (isSupported) {
-    // Check if we have stored credentials (from localStorage which is page-accessible)
-    const hasCredentials = localStorage.getItem('opaque_username') !== null;
-    showOpaqueLoginButton();
+    // Check if we have stored credentials via content script
+    const hasCredentials = await checkStoredCredentials();
+    const isLoggedIn = await checkLoginStatus();
 
-    if (hasCredentials) {
-      console.log('[OPAQUE Page] OPAQUE supported and credentials found');
-    } else {
-      console.log('[OPAQUE Page] OPAQUE supported but no credentials stored');
+    if (hasCredentials && !isLoggedIn) {
+      console.log('[OPAQUE Page] OPAQUE supported, credentials exist, but user not logged in - showing login button');
+      showOpaqueLoginButton();
+    } else if (hasCredentials && isLoggedIn) {
+      console.log('[OPAQUE Page] User already logged in - not showing button');
+    } else if (!hasCredentials) {
+      console.log('[OPAQUE Page] No credentials stored - not showing button');
     }
   } else {
     console.log('[OPAQUE Page] OPAQUE not supported on this site, no action taken');
