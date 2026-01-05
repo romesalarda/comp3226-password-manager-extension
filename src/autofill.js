@@ -598,6 +598,12 @@ function createAndShowPrompt(username, password, domain, isUpdate = false) {
       promptObserver.disconnect(); // Stop observing
       await saveCredentials(domain, username, password);
       clearDraft(); // Clear draft after successful save
+      // Clear the dismissal flag since user chose to save
+      chrome.storage.local.remove([`opaque_prompt_dismissed_${domain}`], () => {
+        if (chrome.runtime.lastError) {
+          console.error('[Autofill] Failed to clear dismissal flag:', chrome.runtime.lastError);
+        }
+      });
       console.log(`[Autofill] Credentials ${isUpdate ? 'updated' : 'saved'} by user choice`);
       prompt.remove();
       showSaveConfirmation(isUpdate);
@@ -630,6 +636,12 @@ function createAndShowPrompt(username, password, domain, isUpdate = false) {
     // Save a flag to never ask for this domain
     chrome.storage.local.set({ [`never_save_${domain}`]: true });
     clearDraft(); // Clear draft when user chooses never
+    // Clear the dismissal flag since this is permanent
+    chrome.storage.local.remove([`opaque_prompt_dismissed_${domain}`], () => {
+      if (chrome.runtime.lastError) {
+        console.error('[Autofill] Failed to clear dismissal flag:', chrome.runtime.lastError);
+      }
+    });
     console.log('[Autofill] User chose "Never" for domain:', domain);
     prompt.remove();
   });
@@ -637,7 +649,14 @@ function createAndShowPrompt(username, password, domain, isUpdate = false) {
   notNowBtn.addEventListener('click', () => {
     prompt.dataset.userDismissed = 'true'; // Mark as user action
     promptObserver.disconnect(); // Stop observing
-    console.log('[Autofill] User chose "Not Now" - keeping draft');
+    // Store dismissal in extension storage (persists across page refreshes)
+    chrome.storage.local.set({ [`opaque_prompt_dismissed_${domain}`]: Date.now() }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('[Autofill] Failed to save dismissal to storage:', chrome.runtime.lastError);
+      } else {
+        console.log('[Autofill] User chose "Not Now" - keeping draft and marking as dismissed');
+      }
+    });
     // Don't clear draft - keep it so user can save later via extension popup
     prompt.remove();
   });
@@ -658,7 +677,7 @@ function createAndShowPrompt(username, password, domain, isUpdate = false) {
 /**
  * Handle credential capture logic using localStorage draft
  */
-function saveToDraft(username, password) {
+async function saveToDraft(username, password) {
   const domain = getCurrentDomain();
   const draft = {
     domain,
@@ -667,7 +686,8 @@ function saveToDraft(username, password) {
     timestamp: Date.now()
   };
 
-  const credentials = getStoredCredentials(domain);
+  // Check if credentials already match stored ones (need to await this)
+  const credentials = await getStoredCredentials(domain);
   if (credentials && credentials.username === username && credentials.password === password) {
     console.log('[Autofill] Credentials match stored ones, not saving draft');
     return;
@@ -675,7 +695,7 @@ function saveToDraft(username, password) {
   
   try {
     localStorage.setItem('opaque_credential_draft', JSON.stringify(draft));
-    console.log('[Autofill] Credentials saved to draft');
+    console.log('[Autofill] Draft saved:', { domain, username: username.substring(0, 3) + '***' });
   } catch (error) {
     console.error('[Autofill] Failed to save draft to localStorage:', error);
   }
@@ -1019,14 +1039,41 @@ function setupFocusDetection() {
  */
 async function checkForDraftAndPrompt() {
   const draft = getDraft();
+  console.log('[Autofill] Checking for draft:', draft ? 'Found' : 'None');
+  
   const credential = await getStoredCredentials(getCurrentDomain());
+  console.log('[Autofill] Stored credentials:', credential ? 'Exist' : 'None');
+  
   if (draft && draft.username && draft.password && credential === null) {
-    console.log('[Autofill] Found existing draft, showing save prompt');
+    console.log('[Autofill] Draft exists and no stored credentials, checking dismissal status...');
     
-    // Small delay to ensure page is ready
-    setTimeout(() => {
-      showSavePasswordPrompt(draft.username, draft.password, draft.domain, false);
-    }, 1000);
+    // Check if user dismissed the prompt (stored in extension storage)
+    chrome.storage.local.get([`opaque_prompt_dismissed_${draft.domain}`], (result) => {
+      if (chrome.runtime.lastError) {
+        console.error('[Autofill] Failed to check dismissal status:', chrome.runtime.lastError);
+        return;
+      }
+      
+      if (result[`opaque_prompt_dismissed_${draft.domain}`]) {
+        console.log('[Autofill] User previously dismissed prompt, not showing again');
+        return;
+      }
+      
+      console.log('[Autofill] No dismissal found, showing save prompt');
+      
+      // Small delay to ensure page is ready
+      setTimeout(() => {
+        showSavePasswordPrompt(draft.username, draft.password, draft.domain, false);
+      }, 1000);
+    });
+  } else {
+    if (!draft) {
+      console.log('[Autofill] No draft found to show prompt for');
+    } else if (credential !== null) {
+      console.log('[Autofill] Credentials already saved, not showing prompt');
+    } else {
+      console.log('[Autofill] Draft incomplete (missing username or password)');
+    }
   }
 }
 
