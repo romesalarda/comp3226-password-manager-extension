@@ -21,29 +21,42 @@
     const credentials = await getStoredCredentials(domain);
     const hasCredentials = credentials !== null;
     console.log("[Autofill] Has credentials for domain:", hasCredentials);
-    window.dispatchEvent(new CustomEvent("OPAQUE:CredentialsStatus", {
-      detail: { hasCredentials }
-    }));
+    window.dispatchEvent(
+      new CustomEvent("OPAQUE:CredentialsStatus", {
+        detail: { hasCredentials }
+      })
+    );
   });
   window.addEventListener("OPAQUE:RequestLogin", (event) => {
-    console.log("[Autofill] Received OPAQUE:RequestLogin from page", event.detail);
-    chrome.runtime.sendMessage({
-      type: "open-opaque-popup",
-      origin: event.detail.origin
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error("[Autofill] Failed to request popup:", chrome.runtime.lastError);
-      } else {
-        console.log("[Autofill] Popup open request sent:", response);
+    console.log(
+      "[Autofill] Received OPAQUE:RequestLogin from page",
+      event.detail
+    );
+    chrome.runtime.sendMessage(
+      {
+        type: "open-opaque-popup",
+        origin: event.detail.origin
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "[Autofill] Failed to request popup:",
+            chrome.runtime.lastError
+          );
+        } else {
+          console.log("[Autofill] Popup open request sent:", response);
+        }
       }
-    });
+    );
   });
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === "opaque-result") {
       console.log("[Autofill] Received OPAQUE result, forwarding to page");
-      window.dispatchEvent(new CustomEvent("OPAQUE:Complete", {
-        detail: request.data
-      }));
+      window.dispatchEvent(
+        new CustomEvent("OPAQUE:Complete", {
+          detail: request.data
+        })
+      );
       sendResponse({ received: true });
       return true;
     }
@@ -51,8 +64,29 @@
   function getCurrentDomain() {
     return window.location.origin;
   }
+  async function nonceAllowsAutofill() {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: "checkNonceStatus" }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn(
+            "[Autofill] Nonce check failed:",
+            chrome.runtime.lastError
+          );
+          resolve(false);
+          return;
+        }
+        if (!response) {
+          resolve(false);
+          return;
+        }
+        resolve(response.hasValidFreshNonce === true);
+      });
+    });
+  }
   function findLoginFields() {
-    const passwordFields = Array.from(document.querySelectorAll('input[type="password"]'));
+    const passwordFields = Array.from(
+      document.querySelectorAll('input[type="password"]')
+    );
     if (passwordFields.length === 0) {
       return null;
     }
@@ -95,7 +129,10 @@
     return new Promise((resolve) => {
       chrome.storage.local.get([`credentials_${domain}`], (result) => {
         if (chrome.runtime.lastError) {
-          console.error("[Autofill] Error getting credentials:", chrome.runtime.lastError);
+          console.error(
+            "[Autofill] Error getting credentials:",
+            chrome.runtime.lastError
+          );
           resolve(null);
         } else {
           resolve(result[`credentials_${domain}`] || null);
@@ -105,35 +142,97 @@
   }
   async function saveCredentials(domain, username, password) {
     return new Promise((resolve, reject) => {
-      chrome.storage.local.set({
-        [`credentials_${domain}`]: {
-          username,
-          password,
-          savedAt: Date.now()
+      chrome.storage.local.set(
+        {
+          [`credentials_${domain}`]: {
+            username,
+            password,
+            savedAt: Date.now()
+          }
+        },
+        () => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "[Autofill] Error saving credentials:",
+              chrome.runtime.lastError
+            );
+            reject(chrome.runtime.lastError);
+          } else {
+            console.log("[Autofill] Credentials saved for domain:", domain);
+            resolve();
+          }
         }
-      }, () => {
-        if (chrome.runtime.lastError) {
-          console.error("[Autofill] Error saving credentials:", chrome.runtime.lastError);
-          reject(chrome.runtime.lastError);
-        } else {
-          console.log("[Autofill] Credentials saved for domain:", domain);
-          resolve();
-        }
-      });
+      );
     });
   }
   function fillLoginForm(loginForm, credentials) {
     if (loginForm.usernameField && credentials.username) {
       loginForm.usernameField.value = credentials.username;
-      loginForm.usernameField.dispatchEvent(new Event("input", { bubbles: true }));
-      loginForm.usernameField.dispatchEvent(new Event("change", { bubbles: true }));
+      loginForm.usernameField.dispatchEvent(
+        new Event("input", { bubbles: true })
+      );
+      loginForm.usernameField.dispatchEvent(
+        new Event("change", { bubbles: true })
+      );
     }
     if (loginForm.passwordField && credentials.password) {
       loginForm.passwordField.value = credentials.password;
-      loginForm.passwordField.dispatchEvent(new Event("input", { bubbles: true }));
-      loginForm.passwordField.dispatchEvent(new Event("change", { bubbles: true }));
+      loginForm.passwordField.dispatchEvent(
+        new Event("input", { bubbles: true })
+      );
+      loginForm.passwordField.dispatchEvent(
+        new Event("change", { bubbles: true })
+      );
     }
     console.log("[Autofill] Form filled with stored credentials");
+  }
+  function showAutofillBlockedBadge(reason = "Autofill blocked") {
+    removeAutofillBadge();
+    autofillBadge = document.createElement("div");
+    autofillBadge.id = "opaque-autofill-badge";
+    autofillBadge.innerHTML = `
+    <div class="badge-content">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <span>${reason}</span>
+    </div>
+  `;
+    const style = document.createElement("style");
+    style.textContent = `
+    #opaque-autofill-badge {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 999999;
+      background: linear-gradient(135deg, #b71c1c 0%, #e53935 100%);
+      color: white;
+      padding: 12px 16px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 14px;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    #opaque-autofill-badge .badge-content {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+  `;
+    document.head.appendChild(style);
+    document.body.appendChild(autofillBadge);
+    setTimeout(() => {
+      if (autofillBadge) {
+        autofillBadge.style.opacity = "0";
+        autofillBadge.style.transition = "opacity 0.3s";
+        setTimeout(removeAutofillBadge, 300);
+      }
+    }, 6e3);
   }
   function showAutofillBadge(loginForms, credentials) {
     removeAutofillBadge();
@@ -466,7 +565,9 @@
       mutations.forEach((mutation) => {
         mutation.removedNodes.forEach((node) => {
           if (node === prompt && prompt.dataset.userDismissed !== "true") {
-            console.log("[Autofill] Prompt removed by page navigation, re-adding");
+            console.log(
+              "[Autofill] Prompt removed by page navigation, re-adding"
+            );
             setTimeout(() => {
               if (document.body && !document.getElementById("opaque-save-prompt")) {
                 document.body.appendChild(prompt);
@@ -490,26 +591,40 @@
         clearDraft();
         chrome.storage.local.remove([`opaque_prompt_dismissed_${domain}`], () => {
           if (chrome.runtime.lastError) {
-            console.error("[Autofill] Failed to clear dismissal flag:", chrome.runtime.lastError);
+            console.error(
+              "[Autofill] Failed to clear dismissal flag:",
+              chrome.runtime.lastError
+            );
           }
         });
-        console.log(`[Autofill] Credentials ${isUpdate ? "updated" : "saved"} by user choice`);
+        console.log(
+          `[Autofill] Credentials ${isUpdate ? "updated" : "saved"} by user choice`
+        );
         prompt.remove();
         showSaveConfirmation(isUpdate);
         const opaqueSupported = await checkOpaqueSupport();
         if (opaqueSupported) {
-          console.log("[Autofill] OPAQUE supported - triggering auto-registration");
-          chrome.runtime.sendMessage({
-            action: "registerWithOpaque",
-            username,
-            password
-          }, (response) => {
-            if (response && response.success) {
-              console.log("[Autofill] OPAQUE registration completed successfully");
-            } else {
-              console.log("[Autofill] OPAQUE registration failed or not supported");
+          console.log(
+            "[Autofill] OPAQUE supported - triggering auto-registration"
+          );
+          chrome.runtime.sendMessage(
+            {
+              action: "registerWithOpaque",
+              username,
+              password
+            },
+            (response) => {
+              if (response && response.success) {
+                console.log(
+                  "[Autofill] OPAQUE registration completed successfully"
+                );
+              } else {
+                console.log(
+                  "[Autofill] OPAQUE registration failed or not supported"
+                );
+              }
             }
-          });
+          );
         }
       } catch (error) {
         console.error("[Autofill] Failed to save credentials:", error);
@@ -522,7 +637,10 @@
       clearDraft();
       chrome.storage.local.remove([`opaque_prompt_dismissed_${domain}`], () => {
         if (chrome.runtime.lastError) {
-          console.error("[Autofill] Failed to clear dismissal flag:", chrome.runtime.lastError);
+          console.error(
+            "[Autofill] Failed to clear dismissal flag:",
+            chrome.runtime.lastError
+          );
         }
       });
       console.log('[Autofill] User chose "Never" for domain:', domain);
@@ -531,13 +649,21 @@
     notNowBtn.addEventListener("click", () => {
       prompt.dataset.userDismissed = "true";
       promptObserver.disconnect();
-      chrome.storage.local.set({ [`opaque_prompt_dismissed_${domain}`]: Date.now() }, () => {
-        if (chrome.runtime.lastError) {
-          console.error("[Autofill] Failed to save dismissal to storage:", chrome.runtime.lastError);
-        } else {
-          console.log('[Autofill] User chose "Not Now" - keeping draft and marking as dismissed');
+      chrome.storage.local.set(
+        { [`opaque_prompt_dismissed_${domain}`]: Date.now() },
+        () => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "[Autofill] Failed to save dismissal to storage:",
+              chrome.runtime.lastError
+            );
+          } else {
+            console.log(
+              '[Autofill] User chose "Not Now" - keeping draft and marking as dismissed'
+            );
+          }
         }
-      });
+      );
       prompt.remove();
     });
     setTimeout(() => {
@@ -566,7 +692,10 @@
     }
     try {
       localStorage.setItem("opaque_credential_draft", JSON.stringify(draft));
-      console.log("[Autofill] Draft saved:", { domain, username: username.substring(0, 3) + "***" });
+      console.log("[Autofill] Draft saved:", {
+        domain,
+        username: username.substring(0, 3) + "***"
+      });
     } catch (error) {
       console.error("[Autofill] Failed to save draft to localStorage:", error);
     }
@@ -605,7 +734,9 @@
       if (response) {
         const data = await response.json();
         if (data.opaque_supported) {
-          console.log("[Autofill] OPAQUE endpoint accessible - OPAQUE is supported");
+          console.log(
+            "[Autofill] OPAQUE endpoint accessible - OPAQUE is supported"
+          );
           return true;
         }
       }
@@ -659,21 +790,36 @@
     const credential = await getStoredCredentials(getCurrentDomain());
     console.log("[Autofill] Stored credentials:", credential ? "Exist" : "None");
     if (draft && draft.username && draft.password && credential === null) {
-      console.log("[Autofill] Draft exists and no stored credentials, checking dismissal status...");
-      chrome.storage.local.get([`opaque_prompt_dismissed_${draft.domain}`], (result) => {
-        if (chrome.runtime.lastError) {
-          console.error("[Autofill] Failed to check dismissal status:", chrome.runtime.lastError);
-          return;
+      console.log(
+        "[Autofill] Draft exists and no stored credentials, checking dismissal status..."
+      );
+      chrome.storage.local.get(
+        [`opaque_prompt_dismissed_${draft.domain}`],
+        (result) => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "[Autofill] Failed to check dismissal status:",
+              chrome.runtime.lastError
+            );
+            return;
+          }
+          if (result[`opaque_prompt_dismissed_${draft.domain}`]) {
+            console.log(
+              "[Autofill] User previously dismissed prompt, not showing again"
+            );
+            return;
+          }
+          console.log("[Autofill] No dismissal found, showing save prompt");
+          setTimeout(() => {
+            showSavePasswordPrompt(
+              draft.username,
+              draft.password,
+              draft.domain,
+              false
+            );
+          }, 1e3);
         }
-        if (result[`opaque_prompt_dismissed_${draft.domain}`]) {
-          console.log("[Autofill] User previously dismissed prompt, not showing again");
-          return;
-        }
-        console.log("[Autofill] No dismissal found, showing save prompt");
-        setTimeout(() => {
-          showSavePasswordPrompt(draft.username, draft.password, draft.domain, false);
-        }, 1e3);
-      });
+      );
     } else {
       if (!draft) {
         console.log("[Autofill] No draft found to show prompt for");
@@ -750,8 +896,14 @@
       const domain = getCurrentDomain();
       chrome.storage.local.remove([`credentials_${domain}`], () => {
         if (chrome.runtime.lastError) {
-          console.error("[Autofill] Failed to clear credentials:", chrome.runtime.lastError);
-          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+          console.error(
+            "[Autofill] Failed to clear credentials:",
+            chrome.runtime.lastError
+          );
+          sendResponse({
+            success: false,
+            error: chrome.runtime.lastError.message
+          });
         } else {
           console.log("[Autofill] Credentials cleared for domain:", domain);
           sendResponse({ success: true });
@@ -763,23 +915,45 @@
       console.log("[Autofill] Received OPAQUE login request");
       const username = request.username;
       const password = request.password;
-      chrome.storage.local.set({
-        "pending_opaque_login": {
-          username,
-          password,
-          timestamp: Date.now()
+      chrome.storage.local.set(
+        {
+          pending_opaque_login: {
+            username,
+            password,
+            timestamp: Date.now()
+          }
+        },
+        () => {
+          console.log("[Autofill] Stored pending login, opening popup...");
+          chrome.runtime.sendMessage(
+            { action: "openPopupForLogin" },
+            (response) => {
+              sendResponse({
+                success: true,
+                queued: true,
+                message: "Login queued for popup"
+              });
+            }
+          );
         }
-      }, () => {
-        console.log("[Autofill] Stored pending login, opening popup...");
-        chrome.runtime.sendMessage({ action: "openPopupForLogin" }, (response) => {
-          sendResponse({ success: true, queued: true, message: "Login queued for popup" });
-        });
-      });
+      );
       return true;
     }
   });
   init();
   async function attemptAutofill() {
+    const nonceAllowed = await nonceAllowsAutofill();
+    if (!nonceAllowed) {
+      console.warn("[Autofill] Blocked: no fresh nonce available");
+      showAutofillBlockedBadge("Autofill blocked \u2014 no fresh nonce");
+      const domain2 = getCurrentDomain();
+      const credentials2 = await getStoredCredentials(domain2);
+      const draft = getDraft?.();
+      if (credentials2 || draft) {
+        chrome.runtime.sendMessage({ action: "openPopupForLogin" });
+      }
+      return;
+    }
     const domain = getCurrentDomain();
     const credentials = await getStoredCredentials(domain);
     if (!credentials) {
