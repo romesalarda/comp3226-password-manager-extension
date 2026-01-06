@@ -47,12 +47,16 @@ In `opaque.js`, you have access to:
 
 ### Expected Django Endpoints
 
-Configure these endpoints in your Django server:
+Configure these endpoints in your Django server or use the django_rest_opaque package which autoimplements them:
 
-- `POST /api/opaque/register/start` - Registration step 1
-- `POST /api/opaque/register/finish` - Registration step 2
-- `POST /api/opaque/login/start` - Login step 1
-- `POST /api/opaque/login/finish` - Login step 2
+- `POST /o/register/start` - Registration step 1
+- `POST /o/register/finish` - Registration step 2
+- `POST /o/login/start` - Login step 1
+- `POST /o/login/finish` - Login step 2
+
+- `POST /o/session/verify` - Session verification
+- `POST /o/session/login` - Session login
+- `POST /o/session/logout` - Session logout
 
 ## Development
 

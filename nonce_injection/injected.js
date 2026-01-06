@@ -25,10 +25,45 @@
         return null;
       }
     }
+    function isElementOrParentHidden(element) {
+      let current = element;
+      while (current && current !== document.body && current !== document.documentElement) {
+        const style = window.getComputedStyle(current);
+        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0" || current.hidden || current.getAttribute("aria-hidden") === "true") {
+          return true;
+        }
+        const rect = current.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0 || rect.width < 2 || rect.height < 2) {
+          return true;
+        }
+        if (rect.left < -9e3 || rect.top < -9e3) {
+          return true;
+        }
+        if (style.overflow === "hidden" || style.overflowY === "hidden") {
+          if (rect.height < 5) {
+            return true;
+          }
+          const height = parseFloat(style.height);
+          if (!isNaN(height) && height < 5) {
+            return true;
+          }
+        }
+        current = current.parentElement;
+      }
+      return false;
+    }
     function findLoginTargets() {
-      const passwordInputs = [
-        ...document.querySelectorAll('input[type="password"]')
+      const allPasswordInputs = [
+        ...document.querySelectorAll(
+          'input[type="password"]:not([disabled]):not([hidden]):not([aria-hidden="true"]):not([type="hidden"]):not([style*="display: none"]):not([style*="visibility: hidden"])'
+        )
       ];
+      const passwordInputs = allPasswordInputs.filter((input) => !isElementOrParentHidden(input));
+      console.log(`${LOG_PREFIX} Found ${allPasswordInputs.length} password inputs, ${passwordInputs.length} visible`);
+      if (passwordInputs.length === 0) {
+        console.log(`${LOG_PREFIX} No visible password fields found - skipping nonce injection`);
+        return [];
+      }
       const targets = /* @__PURE__ */ new Map();
       passwordInputs.forEach((input) => {
         let form = input.form || input.closest("form");

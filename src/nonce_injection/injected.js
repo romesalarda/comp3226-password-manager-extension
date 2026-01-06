@@ -1,7 +1,7 @@
 // src/nonce_injection/injected.js
 // Page-context script for nonce injection.
 //
-//  - Detect login targets using password inputs.
+//  - Detect login targets using password inputs, avoid hidden fields.
 //  - Assign a nonce per target (form or container).
 //  - Insert hidden nonce fields.
 //  - Report issuance and submission events to the extension.
@@ -43,16 +43,82 @@
   }
 
   /**
+   * Check if an element or any of its parent elements are hidden.
+   * Returns true if the element should be considered hidden/invisible.
+   */
+  function isElementOrParentHidden(element) {
+    let current = element;
+    
+    while (current && current !== document.body && current !== document.documentElement) {
+      // Check computed styles
+      const style = window.getComputedStyle(current);
+      
+      if (
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.opacity === '0' ||
+        current.hidden ||
+        current.getAttribute('aria-hidden') === 'true'
+      ) {
+        return true;
+      }
+      
+      // Check dimensions - if either width OR height is 0 or very small, it's effectively hidden
+      const rect = current.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0 || rect.width < 2 || rect.height < 2) {
+        return true;
+      }
+      
+      // Check if positioned off-screen
+      if (rect.left < -9000 || rect.top < -9000) {
+        return true;
+      }
+      
+      // Check overflow hidden with zero or minimal height (checks both computed style and actual rendered size)
+      if (style.overflow === 'hidden' || style.overflowY === 'hidden') {
+        // If overflow is hidden and the actual rendered height is tiny, it's hidden
+        if (rect.height < 5) {
+          return true;
+        }
+        
+        // Also check the computed height value
+        const height = parseFloat(style.height);
+        if (!isNaN(height) && height < 5) {
+          return true;
+        }
+      }
+      
+      current = current.parentElement;
+    }
+    
+    return false;
+  }
+
+  /**
    * Locate login targets.
    * Approach:
    *  - Find all password fields.
+   *  - Exclude hidden inputs and inputs with hidden parent containers.
    *  - Prefer associated <form>.
    *  - Fall back to container heuristics for modern login UIs.
    */
   function findLoginTargets() {
-    const passwordInputs = [
-      ...document.querySelectorAll('input[type="password"]'),
+    const allPasswordInputs = [
+      ...document.querySelectorAll(
+        'input[type="password"]:not([disabled]):not([hidden]):not([aria-hidden="true"]):not([type="hidden"]):not([style*="display: none"]):not([style*="visibility: hidden"])'),
     ];
+    
+    // Filter out inputs that are hidden or have hidden parents
+    const passwordInputs = allPasswordInputs.filter(input => !isElementOrParentHidden(input));
+    
+    console.log(`${LOG_PREFIX} Found ${allPasswordInputs.length} password inputs, ${passwordInputs.length} visible`);
+    
+    // If no visible password fields, don't inject nonces (security: prevents nonce injection on malicious pages)
+    if (passwordInputs.length === 0) {
+      console.log(`${LOG_PREFIX} No visible password fields found - skipping nonce injection`);
+      return [];
+    }
+    
     const targets = new Map();
 
     passwordInputs.forEach((input) => {

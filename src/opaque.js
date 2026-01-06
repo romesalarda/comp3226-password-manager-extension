@@ -1,10 +1,8 @@
 // Popup script for OPAQUE extension
 import * as opaque from "@serenity-kit/opaque";
 
-// Django server configuration
-// const DJANGO_SERVER = 'https://steadfast-reprieve-production.up.railway.app';
 let websiteOrigin = null;
-  
+
 async function getWebsiteOrigin() {
   if (websiteOrigin) {
     return websiteOrigin;
@@ -16,20 +14,19 @@ async function getWebsiteOrigin() {
         reject(chrome.runtime.lastError);
         return;
       }
-      
       if (tabs[0]) {
         websiteOrigin = new URL(tabs[0].url).origin;
-        console.log('Current website:', websiteOrigin);
+        console.log('[Opaque] Current website:', websiteOrigin);
         resolve(websiteOrigin);
       } else {
-        console.log('No active tab found');
+        console.log('[Opaque] No active tab found');
         reject(new Error('No active tab found'));
       }
     });
   });
 }
 
-// Helper function to get CSRF token from Django cookie via background script
+// Helper function to get CSRF token from server cookie via background script
 async function getCSRFToken() {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(

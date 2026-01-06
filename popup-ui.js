@@ -274,7 +274,7 @@
         const websiteOrigin = await api.getWebsiteOrigin();
         if (sessionCheck.authenticated) {
           console.log("Session verified successfully:", sessionCheck);
-          updateStatus(`\u2713 Login successful! Opening Django site...`, "success");
+          updateStatus(`\u2713 Login successful! Opening site...`, "success");
           await saveCredentialsForAutofill(email, password);
           setTimeout(() => {
             chrome.tabs.create({ url: `${websiteOrigin}/o/session/redirect` });

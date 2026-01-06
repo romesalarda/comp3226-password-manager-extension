@@ -52,6 +52,17 @@ window.addEventListener('OPAQUE:RequestLogin', (event) => {
 });
 
 
+// Listen for OPAQUE dismissal from page script
+window.addEventListener('OPAQUE:Dismissed', (event) => {
+  console.log('[Autofill] OPAQUE button dismissed, autofill can now take over');
+  // Store dismissal state (session-based, cleared on page reload)
+  sessionStorage.setItem('opaque_dismissed', 'true');
+  // Now show autofill badge since user chose not to use OPAQUE
+  setTimeout(() => {
+    attemptAutofill();
+  }, 500);
+});
+
 // Listen for OPAQUE results from background/popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'opaque-result') {
@@ -68,6 +79,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 /**
+ * Check if an element or any of its parent elements are hidden.
+ * Security defense against malicious hidden password fields.
+ */
+function isElementOrParentHidden(element) {
+  let current = element;
+  
+  while (current && current !== document.body && current !== document.documentElement) {
+    // Check computed styles
+    const style = window.getComputedStyle(current);
+    
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.opacity === '0' ||
+      current.hidden ||
+      current.getAttribute('aria-hidden') === 'true'
+    ) {
+      return true;
+    }
+    
+    // Check dimensions - if either width OR height is 0 or very small, it's effectively hidden
+    const rect = current.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0 || rect.width < 2 || rect.height < 2) {
+      return true;
+    }
+    
+    // Check if positioned off-screen
+    if (rect.left < -9000 || rect.top < -9000) {
+      return true;
+    }
+    
+    // Check overflow hidden with zero or minimal height
+    if (style.overflow === 'hidden' || style.overflowY === 'hidden') {
+      const height = parseFloat(style.height);
+      if (height === 0 || (height > 0 && height < 5)) {
+        return true;
+      }
+    }
+    
+    current = current.parentElement;
+  }
+  
+  return false;
+}
+
+/**
  * Get current page domain/URL
  */
 function getCurrentDomain() {
@@ -76,10 +133,32 @@ function getCurrentDomain() {
 
 /**
  * Find login form fields on the page
+ * Security: Only returns VISIBLE password fields to prevent credential theft via hidden fields
  */
 function findLoginFields() {
-  // Find password fields
-  const passwordFields = Array.from(document.querySelectorAll('input[type="password"]'));
+  // Find all password fields
+  const allPasswordFields = Array.from(document.querySelectorAll('input[type="password"]'));
+  
+  // Filter out hidden password fields (security defense)
+  let hiddenFieldCount = 0;
+  const passwordFields = allPasswordFields.filter(field => {
+    if (isElementOrParentHidden(field)) {
+      console.warn('[Autofill] Detected hidden password field - skipping for security:', field);
+      hiddenFieldCount++;
+      return false;
+    }
+    return true;
+  });
+  
+  console.log(`[Autofill] Found ${allPasswordFields.length} password fields, ${passwordFields.length} visible`);
+  
+  // Show security warning if hidden fields detected
+  if (hiddenFieldCount > 0) {
+    const plural = hiddenFieldCount > 1 ? 's' : '';
+    showSecurityWarning(
+      `Detected ${hiddenFieldCount} hidden password field${plural} on this page. Autofill will NOT fill hidden fields to protect your credentials.`
+    );
+  }
   
   if (passwordFields.length === 0) {
     return null;
@@ -175,22 +254,107 @@ async function saveCredentials(domain, username, password) {
 }
 
 /**
+ * Add visual feedback animation to a filled field
+ */
+function addFillAnimation(field, fieldType) {
+  if (!field) return;
+  
+  // Store original styles
+  const originalBorder = field.style.border;
+  const originalBackground = field.style.background;
+  const originalTransition = field.style.transition;
+  
+  // Add autofill animation
+  field.style.transition = 'all 0.3s ease';
+  field.style.border = '2px solid #667eea';
+  field.style.background = 'linear-gradient(90deg, rgba(102, 126, 234, 0.1) 0%, rgba(255, 255, 255, 0) 100%)';
+  
+  // Add a small indicator badge
+  const badge = document.createElement('div');
+  badge.style.cssText = `
+    position: absolute;
+    left: ${field.offsetLeft + field.offsetWidth - 80}px;
+    top: ${field.offsetTop - 25}px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    z-index: 10000;
+    pointer-events: none;
+    animation: fadeInOut 2s ease;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  `;
+  badge.textContent = `✓ ${fieldType} filled`;
+  
+  // Add animation keyframes if not already present
+  if (!document.getElementById('autofill-animation-styles')) {
+    const styleSheet = document.createElement('style');
+    styleSheet.id = 'autofill-animation-styles';
+    styleSheet.textContent = `
+      @keyframes fadeInOut {
+        0% { opacity: 0; transform: translateY(5px); }
+        20% { opacity: 1; transform: translateY(0); }
+        80% { opacity: 1; transform: translateY(0); }
+        100% { opacity: 0; transform: translateY(-5px); }
+      }
+    `;
+    document.head.appendChild(styleSheet);
+  }
+  
+  // Position badge relative to field's parent
+  const parent = field.parentElement || document.body;
+  parent.style.position = 'relative';
+  parent.appendChild(badge);
+  
+  // Reset styles after animation
+  setTimeout(() => {
+    field.style.transition = originalTransition;
+    field.style.border = originalBorder;
+    field.style.background = originalBackground;
+    badge.remove();
+  }, 2000);
+}
+
+/**
  * Fill login form with credentials
+ * Security: Double-checks fields are visible before filling
+ * UX: Adds visual feedback to show what was filled
  */
 function fillLoginForm(loginForm, credentials) {
+  let filledCount = 0;
+  
   if (loginForm.usernameField && credentials.username) {
-    loginForm.usernameField.value = credentials.username;
-    loginForm.usernameField.dispatchEvent(new Event('input', { bubbles: true }));
-    loginForm.usernameField.dispatchEvent(new Event('change', { bubbles: true }));
+    // Security check: verify field is still visible before filling
+    if (!isElementOrParentHidden(loginForm.usernameField)) {
+      loginForm.usernameField.value = credentials.username;
+      loginForm.usernameField.dispatchEvent(new Event('input', { bubbles: true }));
+      loginForm.usernameField.dispatchEvent(new Event('change', { bubbles: true }));
+      addFillAnimation(loginForm.usernameField, 'Username');
+      filledCount++;
+    } else {
+      console.warn('[Autofill] Skipped hidden username field');
+    }
   }
 
   if (loginForm.passwordField && credentials.password) {
-    loginForm.passwordField.value = credentials.password;
-    loginForm.passwordField.dispatchEvent(new Event('input', { bubbles: true }));
-    loginForm.passwordField.dispatchEvent(new Event('change', { bubbles: true }));
+    // Security check: verify field is still visible before filling
+    if (!isElementOrParentHidden(loginForm.passwordField)) {
+      loginForm.passwordField.value = credentials.password;
+      loginForm.passwordField.dispatchEvent(new Event('input', { bubbles: true }));
+      loginForm.passwordField.dispatchEvent(new Event('change', { bubbles: true }));
+      addFillAnimation(loginForm.passwordField, 'Password');
+      filledCount++;
+    } else {
+      console.warn('[Autofill] Skipped hidden password field - SECURITY RISK DETECTED');
+      
+      // Show security warning to user
+      showSecurityWarning('Hidden password field detected and blocked for your security.');
+    }
   }
 
-  console.log('[Autofill] Form filled with stored credentials');
+  console.log(`[Autofill] Form filled with stored credentials (${filledCount} fields)`);
 }
 
 /**
@@ -221,7 +385,7 @@ function showAutofillBadge(loginForms, credentials) {
       position: fixed;
       top: 20px;
       right: 20px;
-      z-index: 999999;
+      z-index: 999998;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
       padding: 12px 16px;
@@ -307,6 +471,97 @@ function removeAutofillBadge() {
     autofillBadge.parentNode.removeChild(autofillBadge);
     autofillBadge = null;
   }
+}
+
+/**
+ * Show security warning notification
+ */
+function showSecurityWarning(message) {
+  const notification = document.createElement('div');
+  notification.id = 'opaque-security-warning';
+  notification.innerHTML = `
+    <div class="notification-content">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
+      <div>
+        <strong>Security Warning</strong>
+        <p>${message}</p>
+      </div>
+    </div>
+  `;
+
+  const style = document.createElement('style');
+  style.textContent = `
+    #opaque-security-warning {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2147483646;
+      background: linear-gradient(135deg, #f45c43 0%, #eb3349 100%);
+      color: white;
+      padding: 16px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 14px;
+      animation: slideDown 0.3s ease-out;
+      min-width: 320px;
+      max-width: 500px;
+    }
+
+    @keyframes slideDown {
+      from {
+        transform: translateX(-50%) translateY(-100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+      }
+    }
+
+    #opaque-security-warning .notification-content {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    
+    #opaque-security-warning .notification-content svg {
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    
+    #opaque-security-warning strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 15px;
+    }
+    
+    #opaque-security-warning p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.4;
+      opacity: 0.95;
+    }
+  `;
+
+  document.head.appendChild(style);
+  document.body.appendChild(notification);
+
+  setTimeout(() => {
+    notification.style.opacity = '0';
+    notification.style.transform = 'translateX(-50%) translateY(-20px)';
+    notification.style.transition = 'all 0.3s ease-out';
+    setTimeout(() => {
+      if (notification.parentNode) {
+        notification.parentNode.removeChild(notification);
+      }
+    }, 300);
+  }, 5000);
 }
 
 /**
@@ -1092,33 +1347,27 @@ async function init() {
   }
   
   setupSPARouteDetection();
-  
   monitorCredentialInputs();
-  
   // Check for existing draft on page load and show prompt
   checkForDraftAndPrompt();
-  
-  // Check if OPAQUE is supported before auto-filling
-  const opaqueSupported = await checkOpaqueSupport();
-  
-  if (opaqueSupported && credentials) {
-    console.log('[Autofill] OPAQUE supported - page script will handle UI');
-    // Page script will show the "Sign in via OPAQUE" button
-    // Don't auto-fill in this case
-  } else {
-    // OPAQUE not supported or no credentials - proceed with normal autofill
-    console.log('[Autofill] Using standard autofill behavior');
+  // Delay autofill to give OPAQUE priority
+  // Only show autofill after OPAQUE has had time to display or if OPAQUE is dismissed
+  console.log('[Autofill] Waiting to give OPAQUE priority...');
+  // Wait 3 seconds before attempting autofill to give OPAQUE time to show
+  setTimeout(async () => {
+    // Check if OPAQUE is active and not dismissed
+    const opaqueSupported = await checkOpaqueSupport();
+    const opaqueDismissed = sessionStorage.getItem('opaque_dismissed') === 'true';
     
-    // Attempt auto-fill on page load
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', attemptAutofill);
-    } else {
-      attemptAutofill();
+    if (opaqueSupported && !opaqueDismissed) {
+      console.log('[Autofill] OPAQUE is active, deferring autofill');
+      // Don't attempt autofill yet - wait for OPAQUE to be dismissed or used
+      return;
     }
-
-    // Also try again after a short delay for dynamic content
-    setTimeout(attemptAutofill, 2000);
-  }
+    // OPAQUE not active or dismissed, proceed with autofill
+    console.log('[Autofill] OPAQUE not active or dismissed, showing autofill');
+    attemptAutofill();
+  }, 3000);
 }
 
 /**
@@ -1258,7 +1507,6 @@ async function attemptAutofill() {
  */
 function setupSPARouteDetection() {
   console.log('[Autofill] Setting up SPA route change detection');
-  
   // Throttle autofill attempts to avoid excessive calls
   let autofillThrottleTimer = null;
   const throttledAutofill = () => {

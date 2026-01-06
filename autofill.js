@@ -38,6 +38,13 @@
       }
     });
   });
+  window.addEventListener("OPAQUE:Dismissed", (event) => {
+    console.log("[Autofill] OPAQUE button dismissed, autofill can now take over");
+    sessionStorage.setItem("opaque_dismissed", "true");
+    setTimeout(() => {
+      attemptAutofill();
+    }, 500);
+  });
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === "opaque-result") {
       console.log("[Autofill] Received OPAQUE result, forwarding to page");
@@ -48,11 +55,51 @@
       return true;
     }
   });
+  function isElementOrParentHidden(element) {
+    let current = element;
+    while (current && current !== document.body && current !== document.documentElement) {
+      const style = window.getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0" || current.hidden || current.getAttribute("aria-hidden") === "true") {
+        return true;
+      }
+      const rect = current.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0 || rect.width < 2 || rect.height < 2) {
+        return true;
+      }
+      if (rect.left < -9e3 || rect.top < -9e3) {
+        return true;
+      }
+      if (style.overflow === "hidden" || style.overflowY === "hidden") {
+        const height = parseFloat(style.height);
+        if (height === 0 || height > 0 && height < 5) {
+          return true;
+        }
+      }
+      current = current.parentElement;
+    }
+    return false;
+  }
   function getCurrentDomain() {
     return window.location.origin;
   }
   function findLoginFields() {
-    const passwordFields = Array.from(document.querySelectorAll('input[type="password"]'));
+    const allPasswordFields = Array.from(document.querySelectorAll('input[type="password"]'));
+    let hiddenFieldCount = 0;
+    const passwordFields = allPasswordFields.filter((field) => {
+      if (isElementOrParentHidden(field)) {
+        console.warn("[Autofill] Detected hidden password field - skipping for security:", field);
+        hiddenFieldCount++;
+        return false;
+      }
+      return true;
+    });
+    console.log(`[Autofill] Found ${allPasswordFields.length} password fields, ${passwordFields.length} visible`);
+    if (hiddenFieldCount > 0) {
+      const plural = hiddenFieldCount > 1 ? "s" : "";
+      showSecurityWarning(
+        `Detected ${hiddenFieldCount} hidden password field${plural} on this page. Autofill will NOT fill hidden fields to protect your credentials.`
+      );
+    }
     if (passwordFields.length === 0) {
       return null;
     }
@@ -122,18 +169,81 @@
       });
     });
   }
+  function addFillAnimation(field, fieldType) {
+    if (!field)
+      return;
+    const originalBorder = field.style.border;
+    const originalBackground = field.style.background;
+    const originalTransition = field.style.transition;
+    field.style.transition = "all 0.3s ease";
+    field.style.border = "2px solid #667eea";
+    field.style.background = "linear-gradient(90deg, rgba(102, 126, 234, 0.1) 0%, rgba(255, 255, 255, 0) 100%)";
+    const badge = document.createElement("div");
+    badge.style.cssText = `
+    position: absolute;
+    left: ${field.offsetLeft + field.offsetWidth - 80}px;
+    top: ${field.offsetTop - 25}px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    z-index: 10000;
+    pointer-events: none;
+    animation: fadeInOut 2s ease;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  `;
+    badge.textContent = `\u2713 ${fieldType} filled`;
+    if (!document.getElementById("autofill-animation-styles")) {
+      const styleSheet = document.createElement("style");
+      styleSheet.id = "autofill-animation-styles";
+      styleSheet.textContent = `
+      @keyframes fadeInOut {
+        0% { opacity: 0; transform: translateY(5px); }
+        20% { opacity: 1; transform: translateY(0); }
+        80% { opacity: 1; transform: translateY(0); }
+        100% { opacity: 0; transform: translateY(-5px); }
+      }
+    `;
+      document.head.appendChild(styleSheet);
+    }
+    const parent = field.parentElement || document.body;
+    parent.style.position = "relative";
+    parent.appendChild(badge);
+    setTimeout(() => {
+      field.style.transition = originalTransition;
+      field.style.border = originalBorder;
+      field.style.background = originalBackground;
+      badge.remove();
+    }, 2e3);
+  }
   function fillLoginForm(loginForm, credentials) {
+    let filledCount = 0;
     if (loginForm.usernameField && credentials.username) {
-      loginForm.usernameField.value = credentials.username;
-      loginForm.usernameField.dispatchEvent(new Event("input", { bubbles: true }));
-      loginForm.usernameField.dispatchEvent(new Event("change", { bubbles: true }));
+      if (!isElementOrParentHidden(loginForm.usernameField)) {
+        loginForm.usernameField.value = credentials.username;
+        loginForm.usernameField.dispatchEvent(new Event("input", { bubbles: true }));
+        loginForm.usernameField.dispatchEvent(new Event("change", { bubbles: true }));
+        addFillAnimation(loginForm.usernameField, "Username");
+        filledCount++;
+      } else {
+        console.warn("[Autofill] Skipped hidden username field");
+      }
     }
     if (loginForm.passwordField && credentials.password) {
-      loginForm.passwordField.value = credentials.password;
-      loginForm.passwordField.dispatchEvent(new Event("input", { bubbles: true }));
-      loginForm.passwordField.dispatchEvent(new Event("change", { bubbles: true }));
+      if (!isElementOrParentHidden(loginForm.passwordField)) {
+        loginForm.passwordField.value = credentials.password;
+        loginForm.passwordField.dispatchEvent(new Event("input", { bubbles: true }));
+        loginForm.passwordField.dispatchEvent(new Event("change", { bubbles: true }));
+        addFillAnimation(loginForm.passwordField, "Password");
+        filledCount++;
+      } else {
+        console.warn("[Autofill] Skipped hidden password field - SECURITY RISK DETECTED");
+        showSecurityWarning("Hidden password field detected and blocked for your security.");
+      }
     }
-    console.log("[Autofill] Form filled with stored credentials");
+    console.log(`[Autofill] Form filled with stored credentials (${filledCount} fields)`);
   }
   function showAutofillBadge(loginForms, credentials) {
     removeAutofillBadge();
@@ -155,7 +265,7 @@
       position: fixed;
       top: 20px;
       right: 20px;
-      z-index: 999999;
+      z-index: 999998;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
       padding: 12px 16px;
@@ -230,6 +340,90 @@
       autofillBadge.parentNode.removeChild(autofillBadge);
       autofillBadge = null;
     }
+  }
+  function showSecurityWarning(message) {
+    const notification = document.createElement("div");
+    notification.id = "opaque-security-warning";
+    notification.innerHTML = `
+    <div class="notification-content">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
+      <div>
+        <strong>Security Warning</strong>
+        <p>${message}</p>
+      </div>
+    </div>
+  `;
+    const style = document.createElement("style");
+    style.textContent = `
+    #opaque-security-warning {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2147483646;
+      background: linear-gradient(135deg, #f45c43 0%, #eb3349 100%);
+      color: white;
+      padding: 16px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 14px;
+      animation: slideDown 0.3s ease-out;
+      min-width: 320px;
+      max-width: 500px;
+    }
+
+    @keyframes slideDown {
+      from {
+        transform: translateX(-50%) translateY(-100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+      }
+    }
+
+    #opaque-security-warning .notification-content {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    
+    #opaque-security-warning .notification-content svg {
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    
+    #opaque-security-warning strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 15px;
+    }
+    
+    #opaque-security-warning p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.4;
+      opacity: 0.95;
+    }
+  `;
+    document.head.appendChild(style);
+    document.body.appendChild(notification);
+    setTimeout(() => {
+      notification.style.opacity = "0";
+      notification.style.transform = "translateX(-50%) translateY(-20px)";
+      notification.style.transition = "all 0.3s ease-out";
+      setTimeout(() => {
+        if (notification.parentNode) {
+          notification.parentNode.removeChild(notification);
+        }
+      }, 300);
+    }, 5e3);
   }
   function showSaveConfirmation(isUpdate = false) {
     const notification = document.createElement("div");
@@ -694,18 +888,17 @@
     setupSPARouteDetection();
     monitorCredentialInputs();
     checkForDraftAndPrompt();
-    const opaqueSupported = await checkOpaqueSupport();
-    if (opaqueSupported && credentials) {
-      console.log("[Autofill] OPAQUE supported - page script will handle UI");
-    } else {
-      console.log("[Autofill] Using standard autofill behavior");
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", attemptAutofill);
-      } else {
-        attemptAutofill();
+    console.log("[Autofill] Waiting to give OPAQUE priority...");
+    setTimeout(async () => {
+      const opaqueSupported = await checkOpaqueSupport();
+      const opaqueDismissed = sessionStorage.getItem("opaque_dismissed") === "true";
+      if (opaqueSupported && !opaqueDismissed) {
+        console.log("[Autofill] OPAQUE is active, deferring autofill");
+        return;
       }
-      setTimeout(attemptAutofill, 2e3);
-    }
+      console.log("[Autofill] OPAQUE not active or dismissed, showing autofill");
+      attemptAutofill();
+    }, 3e3);
   }
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log("listener triggered", request);

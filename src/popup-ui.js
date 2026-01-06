@@ -1,7 +1,5 @@
 // UI handler for popup
 console.log('popup-ui.js loaded and executing');
-// const DJANGO_SERVER = 'https://steadfast-reprieve-production.up.railway.app';
-
 // Helper: Save credentials for autofill system AND auto-register with OPAQUE if supported
 async function saveCredentialsForAutofill(username, password) {
   try {
@@ -371,12 +369,11 @@ if (loginBtn) {
       
       if (sessionCheck.authenticated) {
         console.log('Session verified successfully:', sessionCheck);
-        updateStatus(`✓ Login successful! Opening Django site...`, 'success');
+        updateStatus(`✓ Login successful! Opening site...`, 'success');
         
         // Save credentials for autofill
         await saveCredentialsForAutofill(email, password);
         
-        // Open Django redirect endpoint to transfer session to browser context
         // This endpoint will validate the session and redirect to home page
         setTimeout(() => {
           chrome.tabs.create({ url: `${websiteOrigin}/o/session/redirect` });

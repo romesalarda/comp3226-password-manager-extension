@@ -503,10 +503,10 @@ ${val.stack}`;
         }
         if (tabs[0]) {
           websiteOrigin = new URL(tabs[0].url).origin;
-          console.log("Current website:", websiteOrigin);
+          console.log("[Opaque] Current website:", websiteOrigin);
           resolve(websiteOrigin);
         } else {
-          console.log("No active tab found");
+          console.log("[Opaque] No active tab found");
           reject(new Error("No active tab found"));
         }
       });
